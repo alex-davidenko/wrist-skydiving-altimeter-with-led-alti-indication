@@ -73,7 +73,10 @@
 // advance and 8N px tall.
 #define ALT_TEXT_SIZE_MAX  17
 #define ALT_BOTTOM_BAND    26   // px reserved at the bottom for vertical speed
-#define DISPLAY_PERIOD_MS  50   // 20 Hz render; free now that it has its own core
+#define DISPLAY_PERIOD_MS  50   // 20 Hz content redraw
+// Backlight blink resolution. The task ticks this fast so blink edges are
+// crisp; only the GPIO is touched at this rate, not the panel.
+#define DISPLAY_TICK_MS     5
 
 // The renderer runs pinned to the core the Arduino loop does not use, because
 // a full-screen fill measured 23.7 ms against a 25 ms sample period.

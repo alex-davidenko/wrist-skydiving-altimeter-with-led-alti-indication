@@ -228,14 +228,15 @@ namespace {
 
 // Draw one frame from an already-copied snapshot. Runs only on the display
 // task, so it is free to take as long as it likes.
-void renderFrame(const Shared &st, uint32_t nowMs)
+// Content only. Blinking is NOT done here — see backlightPhase().
+//
+// Repainting the background to blink looked wrong on hardware: fillScreen
+// pushes 880 kbit down a serial bus, so at 40 MHz the new colour visibly
+// sweeps across the panel over 23.7 ms instead of changing at once. A
+// framebuffer would not help; the flush is the same 23.7 ms transfer.
+void renderFrame(const Shared &st)
 {
-  // Blink by alternating the background to black. The number is redrawn on
-  // top of whichever colour is showing, so it stays readable throughout.
-  bool on = true;
-  if (st.periodMs > 0) on = (nowMs % st.periodMs) < (st.periodMs / 2u);
-
-  const uint16_t bg  = on ? rgb565(st.color) : RGB565_BLACK;
+  const uint16_t bg  = rgb565(st.color);
   const uint16_t ink = inkFor(bg);
 
   if (bg != g_lastBg)
@@ -296,8 +297,24 @@ void renderFrame(const Shared &st, uint32_t nowMs)
   }
 }
 
+// Blink the backlight rather than the pixels. One GPIO write switches the
+// entire panel at once, which is what "blinking" should look like, and costs
+// nothing on the bus. The frame memory keeps holding the zone colour and the
+// number underneath, so the content is intact the instant the light returns.
+bool backlightPhase(const Shared &st, uint32_t nowMs)
+{
+  // A black pattern means "show nothing" — kill the backlight rather than
+  // lighting a black screen.
+  if (st.color.r == 0 && st.color.g == 0 && st.color.b == 0) return false;
+  if (st.periodMs == 0) return true;
+  return (nowMs % st.periodMs) < (st.periodMs / 2u);
+}
+
 void displayTask(void *)
 {
+  bool     lastBl   = true;
+  uint32_t lastDraw = 0;
+
   for (;;)
   {
     Shared st;
@@ -305,8 +322,24 @@ void displayTask(void *)
     st = g_shared;
     portEXIT_CRITICAL(&g_mux);
 
-    renderFrame(st, millis());
-    vTaskDelay(pdMS_TO_TICKS(DISPLAY_PERIOD_MS));
+    const uint32_t now = millis();
+
+    // Backlight every tick, so blink edges land within DISPLAY_TICK_MS.
+    const bool bl = backlightPhase(st, now);
+    if (bl != lastBl)
+    {
+      digitalWrite(PIN_LCD_BL, bl ? HIGH : LOW);
+      lastBl = bl;
+    }
+
+    // Pixels far less often, and only when something actually changed.
+    if (static_cast<uint32_t>(now - lastDraw) >= DISPLAY_PERIOD_MS)
+    {
+      renderFrame(st);
+      lastDraw = now;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(DISPLAY_TICK_MS));
   }
 }
 
