@@ -380,19 +380,24 @@ three digits, 86 px for four — because a GFX font cannot be scaled without
 going blocky again, and `GFXglyph.yOffset` is `int8_t`, capping any glyph at
 127 px tall.
 
-Two Arduino_GFX behaviours have to be worked around, both in its custom-font
-path, which the library itself flags as unreliable ("may introduce many ugly
-output, it should limited using on mono font only"):
+The altitude does not go through Arduino_GFX's text drawing at all. That path
+is flagged unreliable by the library itself ("may introduce many ugly output,
+it should limited using on mono font only") and produced two distinct faults:
+it derives a baseline as `yAdvance * 2 / 3`, marked `TODO ... arbitrary` in the
+source, so `getTextBounds` mis-positioned the digits and clipped them; and its
+opaque-background fill sits on that same fictional baseline, missing the top
+third of a tall glyph and stranding fragments of the previous number.
 
-- It derives a baseline as `yAdvance * 2 / 3`, marked `TODO ... arbitrary` in
-  the source. `getTextBounds` uses it, so layout based on it is wrong. The
-  generator emits measured ink extents instead and the renderer positions from
-  those.
-- Its opaque-background fill is placed off that same fictional baseline, so it
-  misses the top third of a tall glyph and leaves fragments of the previous
-  number behind. Text is therefore drawn transparently, and the old number is
-  erased by redrawing it in the background colour — which also touches far
-  fewer pixels than clearing the band, so there is no flicker. The generator sizes each font to the widest string it must fit
+Instead each digit is composited into a PSRAM scratch cell and pushed with one
+`draw16bitRGBBitmap`. Drawing to the panel directly means erasing the old glyph
+and then drawing the new one, leaving the digit blank for milliseconds in
+between — at 20 Hz that reads as constant flicker. Compositing off-screen
+removes the intermediate state entirely, and positioning comes from the
+generator's measured ink extents rather than the library's guess.
+
+Only digits that actually changed are redrawn, so a typical update touches one
+cell: 2.6 ms, about 5% of the render core. The band is cleared only when the
+digit count or typeface changes and every cell moves. The generator sizes each font to the widest string it must fit
 rather than to a guessed height. Digits are tabular (one uniform advance, each
 glyph centred in it) so a live-updating altitude does not jitter sideways as
 digits change. Cost is 18 KB of flash.

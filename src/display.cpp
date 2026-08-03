@@ -43,7 +43,10 @@ int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
 const AltFont *g_lastAltFont = nullptr;
 char     g_lastStr[10] = {0};
-int16_t  g_lastStrX = 0, g_lastStrY = 0;
+
+// Scratch cell for compositing one digit off-screen. Big enough for the widest
+// advance at the tallest ink; lives in PSRAM because internal RAM is precious.
+uint16_t *g_cell = nullptr;
 
 // State handed over from the sample loop on the other core. Small enough that
 // a spinlock costs nothing; a mutex would risk blocking the sample loop.
@@ -234,6 +237,11 @@ bool begin()
   pinMode(PIN_LCD_BL, OUTPUT);
   digitalWrite(PIN_LCD_BL, HIGH);
 
+  const size_t cellPx = (size_t)kFontAltBig.advance *
+                        (kFontAltBig.inkBottom - kFontAltBig.inkTop);
+  g_cell = (uint16_t *)ps_malloc(cellPx * sizeof(uint16_t));
+  if (!g_cell) g_cell = (uint16_t *)malloc(cellPx * sizeof(uint16_t));
+
   g_ok = true;
   Serial.printf("display: JD9853 %dx%d ready (full fill %lu us)\n",
                 g_w, g_h, (unsigned long)g_fillUs);
@@ -351,6 +359,46 @@ void renderUi(const Shared &st)
   }
 }
 
+// Composite one tabular digit cell off-screen and push it in a single
+// transaction.
+//
+// Drawing text straight to the panel meant erasing the old glyph and then
+// drawing the new one, leaving the digit genuinely blank for several
+// milliseconds in between — at 20 Hz that reads as constant flicker. Building
+// the cell in RAM and blitting it once removes the intermediate state, and
+// also sidesteps Arduino_GFX's custom-font path entirely, whose background
+// fill and baseline are both unreliable (see the notes in renderFrame).
+void blitDigit(const AltFont *af, char ch, int16_t penX, int16_t baseline,
+               uint16_t ink, uint16_t bg)
+{
+  if (!g_cell) return;
+
+  const int16_t cw = af->advance;
+  const int16_t chh = af->inkBottom - af->inkTop;
+  for (int32_t i = 0; i < (int32_t)cw * chh; i++) g_cell[i] = bg;
+
+  if (ch >= af->font->first && ch <= af->font->last)
+  {
+    const GFXglyph *g = &af->font->glyph[ch - af->font->first];
+    const uint8_t  *bm = af->font->bitmap + g->bitmapOffset;
+    const int16_t gx = g->xOffset;
+    const int16_t gy = g->yOffset - af->inkTop;   // glyph top within the cell
+
+    uint32_t bit = 0;
+    for (int16_t yy = 0; yy < g->height; yy++)
+    {
+      for (int16_t xx = 0; xx < g->width; xx++, bit++)
+      {
+        if (!(bm[bit >> 3] & (0x80 >> (bit & 7)))) continue;
+        const int16_t px = gx + xx, py = gy + yy;
+        if (px < 0 || px >= cw || py < 0 || py >= chh) continue;
+        g_cell[(int32_t)py * cw + px] = ink;
+      }
+    }
+  }
+  g_gfx->draw16bitRGBBitmap(penX, baseline + af->inkTop, g_cell, cw, chh);
+}
+
 // Content only. Blinking is NOT done here — see backlightPhase().
 //
 // Repainting the background to blink looked wrong on hardware: fillScreen
@@ -393,50 +441,35 @@ void renderFrame(const Shared &st)
   const uint8_t len = strlen(buf);
 
   // Two typefaces baked at the size they are drawn, rather than one small font
-  // magnified: scaling the built-in 5x7 by ~17 turned every source pixel into a
-  // 17x17 block, which is what made the digits look choppy. Big fits 3 glyphs
-  // across, Med fits 4 — see tools/make_font.py.
+  // magnified — see tools/make_font.py. Big fits 3 glyphs, Med fits 4.
+  //
+  // Layout comes from the font's own measured ink extents, not from
+  // getTextBounds: Arduino_GFX invents a baseline of yAdvance*2/3, flagged
+  // "arbitrary" in the library, which put the digits off-centre and clipped.
   const AltFont *af = (len <= 3) ? &kFontAltBig : &kFontAltMed;
 
-  if (strcmp(buf, g_lastStr) != 0)
+  if (strcmp(buf, g_lastStr) != 0 || af != g_lastAltFont)
   {
-    // Position from the font's own measured ink extents. Arduino_GFX's
-    // getTextBounds invents a baseline of yAdvance*2/3 — flagged "arbitrary"
-    // in the library itself — which put the digits off-centre and clipped them.
     const int16_t bandY = ALT_TOP_BAND;
     const int16_t bandH = g_h - ALT_TOP_BAND;
     const int16_t inkH  = af->inkBottom - af->inkTop;
-    const int16_t x = (g_w - len * af->advance) / 2;
-    const int16_t y = bandY + (bandH - inkH) / 2 - af->inkTop;   // baseline
+    const int16_t x0 = (g_w - len * af->advance) / 2;
+    const int16_t baseline = bandY + (bandH - inkH) / 2 - af->inkTop;
 
-    // Erase by redrawing the previous number in the background colour, then
-    // draw the new one. Both are drawn WITHOUT an opaque background: the
-    // library's background fill for custom fonts is placed off that same
-    // fictional baseline and misses the top third of each glyph, which is what
-    // left fragments of the old digits on screen. Stroke-only erase also
-    // touches far fewer pixels than clearing the whole band, so there is no
-    // flicker.
-    g_gfx->setTextWrap(false);
-    g_gfx->setTextSize(1, 1, 0);
+    // A different digit count or typeface moves every cell, so the band has to
+    // be cleared. Otherwise only the digits that actually changed are touched —
+    // usually just the last one, which is what keeps this cheap at 20 Hz.
+    const bool moved = (strlen(g_lastStr) != len) || (af != g_lastAltFont);
+    if (moved) g_gfx->fillRect(0, bandY, g_w, bandH, bg);
 
-    if (g_lastStr[0] && g_lastAltFont)
+    for (uint8_t i = 0; i < len; i++)
     {
-      g_gfx->setFont(g_lastAltFont->font);
-      g_gfx->setTextColor(bg);          // one-arg = transparent, no fill
-      g_gfx->setCursor(g_lastStrX, g_lastStrY);
-      g_gfx->print(g_lastStr);
+      if (!moved && g_lastStr[i] == buf[i]) continue;
+      blitDigit(af, buf[i], x0 + i * af->advance, baseline, ink, bg);
     }
-
-    g_gfx->setFont(af->font);
-    g_gfx->setTextColor(ink);
-    g_gfx->setCursor(x, y);
-    g_gfx->print(buf);
-    g_gfx->setFont(NULL);               // built-in font for everything else
 
     strncpy(g_lastStr, buf, sizeof(g_lastStr) - 1);
     g_lastStr[sizeof(g_lastStr) - 1] = '\0';
-    g_lastStrX    = x;
-    g_lastStrY    = y;
     g_lastAltFont = af;
     g_lastAlt     = alt;
   }
