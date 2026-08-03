@@ -369,21 +369,42 @@ miserable to debug on hardware runs on the host in under a second.
 
 ---
 
-## 8. Not done yet
+## 8. Roadmap
 
-- **LED is the onboard WS2812.** It is far too dim for direct sunlight. An
-  external high-power LED is the real deliverable; `LED_DRIVER` in `config.h`
-  already switches to a discrete RGB LED on three PWM pins, but a sunlight-
-  readable design needs proper constant-current drivers, not GPIO.
-- **Power/battery not chosen.** Nothing in the firmware sleeps or manages
-  charge yet.
+Planned, roughly in order:
+
+1. **SD logging.** Log *raw pressure, temperature and timestamp* — not derived
+   altitude. That way any future filter change can be replayed against a real
+   jump without needing another jump. Card slot is SDMMC 4-bit on GPIO13-18 and
+   is confirmed working (SPCC 7.5 GB SDHC mounts under the factory demo).
+   Cards must be FAT32 with an MBR scheme; ESP-IDF returns `FR_NO_FILESYSTEM`
+   on exFAT or GPT, which is what a >32 GB card will default to on macOS.
+2. **Function button** for light sleep and wake.
+3. **Power off via the touch screen.** The AXS5106L controller is already on
+   our I2C bus at `0x63` and answers in the boot scan, so no new wiring.
+4. **Menu with stats and jump history**, once logging exists to feed it.
+5. **Battery and power budget.** The board has VBAT, onboard charging and a
+   calibrated battery ADC (`bsp_battery` in the factory demo proves the
+   hardware). Nothing in the firmware sleeps or manages charge yet, and the
+   panel currently stays lit whenever powered — see `backlightPhase()`.
+
+## 9. Not done yet
+
+- **LED is optional and unused on this board.** The panel is the primary
+  output. A sunlight-readable external LED would need proper constant-current
+  drivers, not GPIO — but the screen may make it unnecessary.
 - **`ZONE_ABOVE` (above 4500 m) shows dim blue.** Guessed, not specified —
   change in `led::colorFor`.
 - **The LED-off band is disabled in flight mode**, so it blinks red all the way
   down. If you want it dark after landing, set the first flight boundary in
   `config.h` to ~15 m.
-- **No logging yet.** Serial CSV only. SD-card logging is waiting on the
-  ESP32-S3 board with a card slot.
+- **No logging yet.** Serial CSV only — see the roadmap above.
+- **Sensor self-heating.** The MS5611 reads 38 C sitting on this board with the
+  panel running, versus 28 C on the C3. Steady-state accuracy is fine, but the
+  MS5611's compensation assumes the die and the pressure element are at the
+  same temperature, and during a fast descent from a 38 C board to sub-zero
+  ambient they are not. Mount the GY-63 off-board on wires, away from the S3
+  and the backlight. That is also where the static port needs to go.
 - **Airflow error is completely uncharacterised**, and it is almost certainly
   the dominant error in freefall — far larger than the ~2-3 m of trigger
   latency. At 50 m/s dynamic pressure is ~14 hPa; full stagnation would be
