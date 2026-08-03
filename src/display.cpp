@@ -10,6 +10,11 @@ bool begin() { return false; }
 void message(const char *, const char *) {}
 void startTask() {}
 void publish(const LedPattern &, float, float) {}
+void setScreen(uint8_t) {}
+uint8_t screen() { return UI_ALT; }
+void setBanner(const char *, const char *) {}
+uint8_t hitTest(int16_t, int16_t) { return ACT_NONE; }
+void sleep() {}
 uint32_t lastFillUs() { return 0; }
 bool available() { return false; }
 }  // namespace display
@@ -45,8 +50,24 @@ struct Shared
   uint16_t periodMs = 0;
   float    altM     = 0.0f;
   float    vsMps    = 0.0f;
+  uint8_t  screen   = UI_ALT;
+  char     l1[20]   = {0};
+  char     l2[20]   = {0};
 };
 Shared g_shared;
+uint8_t g_lastScreen = 0xFF;
+volatile bool g_suspended = false;
+
+// Button rectangles. hitTest() and the renderer both read these, so a button
+// can never be drawn somewhere other than where it responds.
+struct Rect { int16_t x, y, w, h; };
+constexpr Rect kBtnLeft  = { 20, 45, 132, 100};
+constexpr Rect kBtnRight = {168, 45, 132, 100};
+
+bool inside(const Rect &r, int16_t x, int16_t y)
+{
+  return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
 
 // The JD9853 register sequence, straight from Waveshare's own Arduino example.
 // Arduino_GFX has no JD9853 driver in any released version (checked 1.5.9 and
@@ -234,6 +255,57 @@ namespace {
 
 // Draw one frame from an already-copied snapshot. Runs only on the display
 // task, so it is free to take as long as it likes.
+void drawButton(const Rect &r, uint16_t fill, const char *l1, const char *l2)
+{
+  g_gfx->fillRect(r.x, r.y, r.w, r.h, fill);
+  g_gfx->drawRect(r.x, r.y, r.w, r.h, RGB565_WHITE);
+  const uint16_t ink = inkFor(fill);
+  g_gfx->setTextColor(ink, fill);
+  g_gfx->setTextSize(2, 2, 0);
+  const int16_t cy = r.y + r.h / 2 - (l2 && l2[0] ? 18 : 8);
+  g_gfx->setCursor(r.x + (r.w - (int16_t)strlen(l1) * 12) / 2, cy);
+  g_gfx->print(l1);
+  if (l2 && l2[0])
+  {
+    g_gfx->setCursor(r.x + (r.w - (int16_t)strlen(l2) * 12) / 2, cy + 22);
+    g_gfx->print(l2);
+  }
+}
+
+void renderUi(const Shared &st)
+{
+  g_gfx->fillScreen(RGB565_BLACK);
+  g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+  g_gfx->setTextSize(2, 2, 0);
+
+  switch (st.screen)
+  {
+    case UI_MENU:
+      g_gfx->setCursor(20, 14);
+      g_gfx->print("MENU   (tap outside = back)");
+      drawButton(kBtnLeft,  RGB565_BLUE,   "UNMOUNT", "CARD");
+      drawButton(kBtnRight, RGB565_ORANGE, "POWER",   "OFF");
+      break;
+
+    case UI_CONFIRM_UNMOUNT:
+    case UI_CONFIRM_POWER:
+      g_gfx->setCursor(20, 14);
+      g_gfx->print(st.screen == UI_CONFIRM_UNMOUNT ? "UNMOUNT CARD?" : "POWER OFF?");
+      drawButton(kBtnLeft,  RGB565_BLACK, "CANCEL", "");
+      drawButton(kBtnRight, RGB565_RED,   "YES",    "");
+      break;
+
+    case UI_BANNER:
+    default:
+      g_gfx->setTextSize(2, 2, 0);
+      g_gfx->setCursor(20, 60);
+      g_gfx->print(st.l1);
+      g_gfx->setCursor(20, 95);
+      g_gfx->print(st.l2);
+      break;
+  }
+}
+
 // Content only. Blinking is NOT done here — see backlightPhase().
 //
 // Repainting the background to blink looked wrong on hardware: fillScreen
@@ -242,6 +314,18 @@ namespace {
 // framebuffer would not help; the flush is the same 23.7 ms transfer.
 void renderFrame(const Shared &st)
 {
+  if (st.screen != UI_ALT)
+  {
+    if (st.screen != g_lastScreen) { renderUi(st); g_lastScreen = st.screen; }
+    return;
+  }
+  if (g_lastScreen != UI_ALT)
+  {
+    // Coming back from the menu: force a full repaint of the altitude view.
+    g_lastScreen = UI_ALT;
+    g_lastBg = 0xDEAD;
+  }
+
   const uint16_t bg  = rgb565(st.color);
   const uint16_t ink = inkFor(bg);
 
@@ -329,6 +413,8 @@ void displayTask(void *)
     st = g_shared;
     portEXIT_CRITICAL(&g_mux);
 
+    if (g_suspended) { vTaskDelay(pdMS_TO_TICKS(50)); continue; }
+
     const uint32_t now = millis();
 
     // Backlight every tick, so blink edges land within DISPLAY_TICK_MS.
@@ -360,6 +446,60 @@ void publish(const LedPattern &p, float altitudeM, float vspeedMps)
   g_shared.altM     = altitudeM;
   g_shared.vsMps    = vspeedMps;
   portEXIT_CRITICAL(&g_mux);
+}
+
+void setScreen(uint8_t s)
+{
+  portENTER_CRITICAL(&g_mux);
+  g_shared.screen = s;
+  portEXIT_CRITICAL(&g_mux);
+}
+
+uint8_t screen()
+{
+  portENTER_CRITICAL(&g_mux);
+  const uint8_t s = g_shared.screen;
+  portEXIT_CRITICAL(&g_mux);
+  return s;
+}
+
+void setBanner(const char *l1, const char *l2)
+{
+  portENTER_CRITICAL(&g_mux);
+  snprintf(g_shared.l1, sizeof(g_shared.l1), "%s", l1 ? l1 : "");
+  snprintf(g_shared.l2, sizeof(g_shared.l2), "%s", l2 ? l2 : "");
+  g_shared.screen = UI_BANNER;
+  portEXIT_CRITICAL(&g_mux);
+  g_lastScreen = 0xFF;          // force a repaint even if already on a banner
+}
+
+uint8_t hitTest(int16_t x, int16_t y)
+{
+  switch (screen())
+  {
+    case UI_MENU:
+      if (inside(kBtnLeft, x, y))  return ACT_UNMOUNT;
+      if (inside(kBtnRight, x, y)) return ACT_POWER;
+      return ACT_CANCEL;                       // anywhere else backs out
+    case UI_CONFIRM_UNMOUNT:
+    case UI_CONFIRM_POWER:
+      if (inside(kBtnRight, x, y)) return ACT_CONFIRM;
+      return ACT_CANCEL;                       // default to the safe choice
+    default:
+      return ACT_NONE;
+  }
+}
+
+void sleep()
+{
+  if (!g_ok) return;
+  g_suspended = true;
+  delay(80);                                   // let any in-flight draw finish
+  digitalWrite(PIN_LCD_BL, LOW);
+  const uint8_t off[] = {BEGIN_WRITE, WRITE_COMMAND_8, 0x28,   // display off
+                         WRITE_COMMAND_8, 0x10,                // sleep in
+                         END_WRITE};
+  g_bus->batchOperation(off, sizeof(off));
 }
 
 void startTask()

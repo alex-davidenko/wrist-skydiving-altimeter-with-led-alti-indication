@@ -25,6 +25,41 @@
 
 namespace display {
 
+// On-screen UI. Geometry lives in display.cpp next to the rendering, and
+// hitTest() uses the same rectangles, so the buttons and the touch targets
+// cannot drift apart.
+//
+// Every target is kept inside x 20..300, y 45..150. Corner taps measured on
+// hardware only reach about x 15..302, y 34..152 — a button against an edge
+// would be unreachable.
+enum UiScreen : uint8_t
+{
+  UI_ALT = 0,          // normal altitude display
+  UI_MENU,
+  UI_CONFIRM_UNMOUNT,
+  UI_CONFIRM_POWER,
+  UI_BANNER            // plain two-line message
+};
+
+enum UiAction : uint8_t
+{
+  ACT_NONE = 0,
+  ACT_UNMOUNT,
+  ACT_POWER,
+  ACT_CANCEL,
+  ACT_CONFIRM
+};
+
+void    setScreen(uint8_t screen);
+uint8_t screen();
+void    setBanner(const char *line1, const char *line2);
+
+// What a touch at (x,y) means on the screen currently shown.
+uint8_t hitTest(int16_t x, int16_t y);
+
+// Blank the panel and put the controller to sleep, before deep sleep.
+void sleep();
+
 // Bring up the panel. Call from setup(), before startTask().
 // Returns false if the panel did not initialise; everything else then no-ops.
 bool begin();

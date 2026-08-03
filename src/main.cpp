@@ -14,6 +14,8 @@
 #include <Preferences.h>
 #include <Wire.h>
 
+#include <esp_sleep.h>
+
 #include <MS5611.h>
 
 #include "altitude_filter.h"
@@ -268,27 +270,98 @@ static void clearZero()
 }
 
 // ---------------------------------------------------------------------------
-//  Button (BOOT): long press = re-zero
+//  Menu actions
+// ---------------------------------------------------------------------------
+static uint32_t g_menuIdleMs = 0;
+
+static void openMenu()
+{
+  display::setScreen(display::UI_MENU);
+  g_menuIdleMs = millis();
+}
+
+static void closeMenu()
+{
+  display::setScreen(display::UI_ALT);
+}
+
+static void unmountCard()
+{
+  logger::close();
+  display::setBanner("CARD UNMOUNTED", "safe to remove");
+  Serial.println(F("Card unmounted. Logging stays off until reboot."));
+}
+
+// "Power off" is deep sleep, not a true power cut: without a hardware latch the
+// ESP32 cannot disconnect its own supply. Panel asleep, card unmounted, wake on
+// the BOOT button or RST.
+static void powerOff()
+{
+  // Refuse while moving. Shutting down in freefall is the one failure mode
+  // worth designing out, and a stray tap under canopy should never do it.
+  if (fabsf(g_filter.velocity()) > SLEEP_MAX_VSPEED_MPS)
+  {
+    display::setBanner("NOT WHILE", "MOVING");
+    Serial.println(F("Power off refused: still moving."));
+    delay(1500);
+    closeMenu();
+    return;
+  }
+
+  Serial.println(F("Powering down. Press BOOT or RST to wake."));
+  logger::close();
+  display::setBanner("POWERING OFF", "BOOT/RST to wake");
+  delay(1500);
+  display::sleep();
+
+  esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(PIN_BUTTON), 0);
+  esp_deep_sleep_start();
+}
+
+static void handleTouch(int16_t x, int16_t y)
+{
+  g_menuIdleMs = millis();
+  switch (display::hitTest(x, y))
+  {
+    case display::ACT_UNMOUNT: display::setScreen(display::UI_CONFIRM_UNMOUNT); break;
+    case display::ACT_POWER:   display::setScreen(display::UI_CONFIRM_POWER);   break;
+    case display::ACT_CONFIRM:
+      if (display::screen() == display::UI_CONFIRM_POWER) powerOff();
+      else                                                unmountCard();
+      break;
+    case display::ACT_CANCEL:  closeMenu(); break;
+    default: break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Button (BOOT): tap = menu, hold = re-zero
 // ---------------------------------------------------------------------------
 static void pollButton(uint32_t nowMs)
 {
-  static bool     wasDown  = false;
-  static uint32_t downAt   = 0;
-  static bool     fired    = false;
+  static bool     wasDown = false;
+  static uint32_t downAt  = 0;
 
   const int raw = digitalRead(PIN_BUTTON);
   const bool down = BUTTON_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 
-  if (down && !wasDown)
+  if (down && !wasDown) downAt = nowMs;
+
+  // Acting on release, not while held, is what lets one button mean two things
+  // without the short action firing on the way to the long one.
+  if (!down && wasDown)
   {
-    downAt = nowMs;
-    fired  = false;
-  }
-  else if (down && !fired && (nowMs - downAt) >= ZERO_BUTTON_HOLD_MS)
-  {
-    fired = true;
-    zeroHere();
-    resyncSampleClock();
+    const uint32_t held = nowMs - downAt;
+    if (held >= ZERO_BUTTON_HOLD_MS)
+    {
+      zeroHere();
+      resyncSampleClock();
+    }
+    else if (held >= 30)          // debounce
+    {
+      if (display::screen() == display::UI_ALT) openMenu();
+      else                                      closeMenu();
+    }
   }
   wasDown = down;
 }
@@ -583,12 +656,23 @@ void loop()
   if (touch::available())
   {
     const touch::Point t = touch::takeTouch();
-    if (t.valid && g_touchDump)
+    if (t.valid)
     {
-      int16_t rx, ry;
-      touch::rawLast(&rx, &ry);
-      Serial.printf("touch raw=(%4d,%4d) -> mapped=(%4d,%4d)\n", rx, ry, t.x, t.y);
+      if (g_touchDump)
+      {
+        int16_t rx, ry;
+        touch::rawLast(&rx, &ry);
+        Serial.printf("touch raw=(%4d,%4d) -> mapped=(%4d,%4d)\n", rx, ry, t.x, t.y);
+      }
+      if (display::screen() != display::UI_ALT) handleTouch(t.x, t.y);
     }
+  }
+
+  // Never leave a menu covering the altitude in the air.
+  if (display::screen() != display::UI_ALT &&
+      static_cast<uint32_t>(now - g_menuIdleMs) > MENU_TIMEOUT_MS)
+  {
+    closeMenu();
   }
 
   if (static_cast<int32_t>(now - g_nextSampleMs) >= 0)

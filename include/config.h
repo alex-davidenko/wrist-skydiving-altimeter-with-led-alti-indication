@@ -207,6 +207,12 @@
 //         noise cancels in a mean but a trend does not. It can be tight: the
 //         standard error of each half-mean is only ~0.035 m at bench scale.
 #define ZERO_MAX_DRIFT_M      (BENCH_MODE ? 0.20f : 1.00f)
+// Menu closes itself so it can never sit over the altitude during a jump.
+#define MENU_TIMEOUT_MS      15000
+// Power-off is refused above this vertical speed. Shutting down mid-jump is
+// the one failure mode worth designing out.
+#define SLEEP_MAX_VSPEED_MPS 2.0f
+
 // Long-press duration on the BOOT button to trigger a re-zero.
 #define ZERO_BUTTON_HOLD_MS   1500
 
