@@ -134,6 +134,16 @@ def build(name, cap_target):
     out.append(f"  (uint8_t *){name}_bitmap, (GFXglyph *){name}_glyphs,")
     out.append(f"  0x{ord(CHARS[0]):02X}, 0x{ord(CHARS[-1]):02X}, "
                f"{max(g[2] for g in glyphs) + 4}}};")
+
+    # Exact ink extents of the digits, relative to the baseline. Arduino_GFX's
+    # getTextBounds derives its own baseline as yAdvance*2/3, which is flagged
+    # "arbitrary" in the library and does not match real glyph extents — using
+    # it put the digits off-centre and clipped. These are measured.
+    digit_glyphs = [g for ch, g in zip(CHARS, glyphs) if ch in "0123456789"]
+    ink_top = min(g[5] for g in digit_glyphs)
+    ink_bot = max(g[5] + g[2] for g in digit_glyphs)
+    out.append(f"static const AltFont k{name} = {{&{name}, {advance}, "
+               f"{ink_top}, {ink_bot}}};   // ink {ink_bot - ink_top}px tall")
     return "\n".join(out), advance, max(g[2] for g in glyphs)
 
 
@@ -150,6 +160,15 @@ def main():
     print("// Digits are tabular so the altitude does not jitter as digits change.")
     print()
     print('#include <Arduino_GFX_Library.h>')
+    print()
+    print("// Measured metrics so layout never depends on getTextBounds.")
+    print("struct AltFont")
+    print("{")
+    print("  const GFXfont *font;")
+    print("  int16_t advance;   // uniform per-glyph advance (tabular)")
+    print("  int16_t inkTop;    // topmost ink relative to the baseline (negative)")
+    print("  int16_t inkBottom; // bottom-most ink, positive for round overshoot")
+    print("};")
     print()
     # The band above the vertical-speed strip is 146px; cap glyphs at 118 to
     # stay clear of the int8 yOffset limit with margin.

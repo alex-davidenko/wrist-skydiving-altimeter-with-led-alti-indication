@@ -7,6 +7,15 @@
 
 #include <Arduino_GFX_Library.h>
 
+// Measured metrics so layout never depends on getTextBounds.
+struct AltFont
+{
+  const GFXfont *font;
+  int16_t advance;   // uniform per-glyph advance (tabular)
+  int16_t inkTop;    // topmost ink relative to the baseline (negative)
+  int16_t inkBottom; // bottom-most ink, positive for round overshoot
+};
+
 // FontAltBig: Avenir Next Bold, digit height 116px, advance 104px, 12064 bytes
 const uint8_t FontAltBig_bitmap[] PROGMEM = {
   0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0x3F, 0xFF, 0xFF, 0xFF, 0xFF, 0x9F, 0xFF, 0xFF, 0xFF, 0xFF, 0xCF,
@@ -782,6 +791,7 @@ const GFXglyph FontAltBig_glyphs[] PROGMEM = {
 const GFXfont FontAltBig PROGMEM = {
   (uint8_t *)FontAltBig_bitmap, (GFXglyph *)FontAltBig_glyphs,
   0x2D, 0x39, 120};
+static const AltFont kFontAltBig = {&FontAltBig, 104, -113, 3};   // ink 116px tall
 
 // FontAltMed: Avenir Next Bold, digit height 86px, advance 77px, 6699 bytes
 const uint8_t FontAltMed_bitmap[] PROGMEM = {
@@ -1223,4 +1233,5 @@ const GFXglyph FontAltMed_glyphs[] PROGMEM = {
 const GFXfont FontAltMed PROGMEM = {
   (uint8_t *)FontAltMed_bitmap, (GFXglyph *)FontAltMed_glyphs,
   0x2D, 0x39, 90};
+static const AltFont kFontAltMed = {&FontAltMed, 77, -84, 2};   // ink 86px tall
 

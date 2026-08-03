@@ -220,8 +220,8 @@ Use `p` on the console to eyeball every pattern on the bench without flying.
 
 ### Demo jump
 
-**MENU -> swipe left -> DEMO JUMP** replays a whole jump on the screen in about
-45 seconds: 4200 m exit, pilot chute at 1100 m, settled by 800 m, five
+**MENU -> swipe left -> DEMO JUMP** replays a whole jump on the screen in real
+time: 4200 m exit, pilot chute at 1100 m, settled by 800 m, five
 5-second spirals at 15 m/s, then the landing ladder from 300 m down.
 
 It is driven through the *real* ZoneTracker, landing ladder and
@@ -231,9 +231,10 @@ demonstrates the actual logic rather than an animation of it, and a bug in the
 thresholds would show up here. Sampling and logging carry on underneath; any
 touch or BOOT press ends it.
 
-Altitude runs on a compressed clock because the real profile is nearly four
-minutes. Blink rates stay on the real clock, so 3 Hz and 6 Hz look exactly as
-they will in the air.
+It runs in **real time** (`DEMO_SPEED 1.0`), so the whole profile takes about
+3.5 minutes. That is the point — it shows how fast the altitude digits actually
+change in freefall and whether that is readable, which a compressed replay
+cannot tell you.
 
 Two things it shows that are easy to forget:
 
@@ -377,7 +378,21 @@ which turns every source pixel into a 17x17 block — legible but visibly choppy
 Two sizes are baked and chosen at runtime by digit count — 116 px for up to
 three digits, 86 px for four — because a GFX font cannot be scaled without
 going blocky again, and `GFXglyph.yOffset` is `int8_t`, capping any glyph at
-127 px tall. The generator sizes each font to the widest string it must fit
+127 px tall.
+
+Two Arduino_GFX behaviours have to be worked around, both in its custom-font
+path, which the library itself flags as unreliable ("may introduce many ugly
+output, it should limited using on mono font only"):
+
+- It derives a baseline as `yAdvance * 2 / 3`, marked `TODO ... arbitrary` in
+  the source. `getTextBounds` uses it, so layout based on it is wrong. The
+  generator emits measured ink extents instead and the renderer positions from
+  those.
+- Its opaque-background fill is placed off that same fictional baseline, so it
+  misses the top third of a tall glyph and leaves fragments of the previous
+  number behind. Text is therefore drawn transparently, and the old number is
+  erased by redrawing it in the background colour — which also touches far
+  fewer pixels than clearing the band, so there is no flicker. The generator sizes each font to the widest string it must fit
 rather than to a guessed height. Digits are tabular (one uniform advance, each
 glyph centred in it) so a live-updating altitude does not jitter sideways as
 digits change. Cost is 18 KB of flash.

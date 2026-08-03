@@ -209,10 +209,10 @@
 //         noise cancels in a mean but a trend does not. It can be tight: the
 //         standard error of each half-mean is only ~0.035 m at bench scale.
 #define ZERO_MAX_DRIFT_M      (BENCH_MODE ? 0.20f : 1.00f)
-// Demo jump playback. The real profile is nearly four minutes, so altitude runs
-// on a compressed clock; blink rates stay on the real clock so 3 Hz and 6 Hz
-// look exactly as they will in the air.
-#define DEMO_SPEED           5.0f
+// Demo jump playback speed. 1.0 = real time, so the ~3.5 minute profile plays
+// out exactly as it would in the air — which is the point: it shows how fast
+// the altitude actually changes and whether that is readable.
+#define DEMO_SPEED           1.0f
 
 // Menu closes itself so it can never sit over the altitude during a jump.
 #define MENU_TIMEOUT_MS      15000

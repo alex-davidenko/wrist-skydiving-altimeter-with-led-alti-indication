@@ -41,8 +41,9 @@ int16_t g_w = 0, g_h = 0;
 uint16_t g_lastBg    = 0xDEAD;
 int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
-const GFXfont *g_lastFont = nullptr;
-uint8_t  g_lastLen   = 0;
+const AltFont *g_lastAltFont = nullptr;
+char     g_lastStr[10] = {0};
+int16_t  g_lastStrX = 0, g_lastStrY = 0;
 
 // State handed over from the sample loop on the other core. Small enough that
 // a spinlock costs nothing; a mutex would risk blocking the sample loop.
@@ -252,7 +253,8 @@ void message(const char *line1, const char *line2)
   g_lastBg = 0xDEAD;          // force a full repaint on the next frame
   g_lastAlt = INT32_MIN;
   g_lastVs = INT32_MIN;
-  g_lastFont = nullptr;
+  g_lastAltFont = nullptr;
+  g_lastStr[0] = '\0';
 }
 
 namespace {
@@ -376,16 +378,17 @@ void renderFrame(const Shared &st)
   {
     fillAll(bg);
     g_lastBg    = bg;
-    g_lastAlt  = INT32_MIN;    // everything on top must be redrawn
-    g_lastVs   = INT32_MIN;
-    g_lastFont = nullptr;
+    g_lastAlt     = INT32_MIN;   // everything on top must be redrawn
+    g_lastVs      = INT32_MIN;
+    g_lastAltFont = nullptr;
+    g_lastStr[0]  = '\0';        // nothing to erase, the fill did it
   }
 
   // Altitude in whole metres, as large as will fit. The label that used to sit
   // at the top is gone — the background colour already says which zone we are
   // in, so the text was redundant and the digits get the whole screen.
   const int32_t alt = (int32_t)lrintf(st.altM);
-  char buf[8];
+  char buf[10];
   snprintf(buf, sizeof(buf), "%ld", (long)alt);
   const uint8_t len = strlen(buf);
 
@@ -393,35 +396,49 @@ void renderFrame(const Shared &st)
   // magnified: scaling the built-in 5x7 by ~17 turned every source pixel into a
   // 17x17 block, which is what made the digits look choppy. Big fits 3 glyphs
   // across, Med fits 4 — see tools/make_font.py.
-  const int16_t bandY = ALT_TOP_BAND;
-  const int16_t bandH = g_h - ALT_TOP_BAND;
-  const GFXfont *font = (len <= 3) ? &FontAltBig : &FontAltMed;
+  const AltFont *af = (len <= 3) ? &kFontAltBig : &kFontAltMed;
 
-  if (alt != g_lastAlt || font != g_lastFont)
+  if (strcmp(buf, g_lastStr) != 0)
   {
-    // Opaque text only covers its own cells, so a change of font or digit count
-    // — which moves every glyph — can strand old ink. Clear the band then.
-    // Same-length updates redraw in place and stay flicker-free.
-    if (font != g_lastFont || len != g_lastLen)
-      g_gfx->fillRect(0, bandY, g_w, bandH, bg);
+    // Position from the font's own measured ink extents. Arduino_GFX's
+    // getTextBounds invents a baseline of yAdvance*2/3 — flagged "arbitrary"
+    // in the library itself — which put the digits off-centre and clipped them.
+    const int16_t bandY = ALT_TOP_BAND;
+    const int16_t bandH = g_h - ALT_TOP_BAND;
+    const int16_t inkH  = af->inkBottom - af->inkTop;
+    const int16_t x = (g_w - len * af->advance) / 2;
+    const int16_t y = bandY + (bandH - inkH) / 2 - af->inkTop;   // baseline
 
-    g_gfx->setFont(font);
+    // Erase by redrawing the previous number in the background colour, then
+    // draw the new one. Both are drawn WITHOUT an opaque background: the
+    // library's background fill for custom fonts is placed off that same
+    // fictional baseline and misses the top third of each glyph, which is what
+    // left fragments of the old digits on screen. Stroke-only erase also
+    // touches far fewer pixels than clearing the whole band, so there is no
+    // flicker.
+    g_gfx->setTextWrap(false);
     g_gfx->setTextSize(1, 1, 0);
-    g_gfx->setTextColor(ink, bg);
 
-    // Custom fonts place the cursor on the baseline, not the top-left, so ask
-    // for the bounding box and offset the cursor by its origin.
-    int16_t bx, by;
-    uint16_t bw, bh;
-    g_gfx->getTextBounds(buf, 0, 0, &bx, &by, &bw, &bh);
-    g_gfx->setCursor((g_w - (int16_t)bw) / 2 - bx,
-                     bandY + (bandH - (int16_t)bh) / 2 - by);
+    if (g_lastStr[0] && g_lastAltFont)
+    {
+      g_gfx->setFont(g_lastAltFont->font);
+      g_gfx->setTextColor(bg);          // one-arg = transparent, no fill
+      g_gfx->setCursor(g_lastStrX, g_lastStrY);
+      g_gfx->print(g_lastStr);
+    }
+
+    g_gfx->setFont(af->font);
+    g_gfx->setTextColor(ink);
+    g_gfx->setCursor(x, y);
     g_gfx->print(buf);
-    g_gfx->setFont(NULL);          // built-in font for everything else
+    g_gfx->setFont(NULL);               // built-in font for everything else
 
-    g_lastAlt  = alt;
-    g_lastFont = font;
-    g_lastLen  = len;
+    strncpy(g_lastStr, buf, sizeof(g_lastStr) - 1);
+    g_lastStr[sizeof(g_lastStr) - 1] = '\0';
+    g_lastStrX    = x;
+    g_lastStrY    = y;
+    g_lastAltFont = af;
+    g_lastAlt     = alt;
   }
 
   // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
