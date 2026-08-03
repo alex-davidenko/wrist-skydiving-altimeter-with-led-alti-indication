@@ -26,6 +26,7 @@ constexpr uint8_t kRegTouch    = 0x01;
 bool g_ok = false;
 volatile bool g_intFlag = false;
 
+uint32_t g_lastEventMs = 0;
 int16_t g_rawX = 0, g_rawY = 0;
 int16_t g_pendX = 0, g_pendY = 0;
 volatile bool g_pending = false;
@@ -114,6 +115,15 @@ Point takeTouch()
     uint8_t d[14] = {0};
     if (readReg(kRegTouch, d, sizeof(d)) && d[1] > 0)
     {
+      // The controller keeps reporting while a finger is down — one tap
+      // produced ~20 identical events in testing. Collapse a press into a
+      // single event, or every menu button would fire many times per touch.
+      const uint32_t now = millis();
+      if (static_cast<uint32_t>(now - g_lastEventMs) < TOUCH_DEBOUNCE_MS)
+      {
+        return p;
+      }
+      g_lastEventMs = now;
       g_rawX = (int16_t)((((uint16_t)(d[2] & 0x0F)) << 8) | d[3]);
       g_rawY = (int16_t)((((uint16_t)(d[4] & 0x0F)) << 8) | d[5]);
       mapToDisplay(g_rawX, g_rawY, &g_pendX, &g_pendY);

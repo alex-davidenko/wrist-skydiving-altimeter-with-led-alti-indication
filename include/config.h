@@ -99,9 +99,17 @@
 // axes need remapping — and which way round depends on how the panel is
 // mounted, which no datasheet states. Run `T` on the console, tap the corners,
 // and set these from what it prints.
+// Measured on hardware with labelled corners: top-left raw (38,9),
+// bottom-right raw (149,313). These settings map those to (9,38) and
+// (313,149) — both ascending, so the corners come out the right way round.
+// The inset is just not tapping the literal edge pixels.
 #define TOUCH_SWAP_XY     1
 #define TOUCH_FLIP_X      0
-#define TOUCH_FLIP_Y      1
+#define TOUCH_FLIP_Y      0
+// One event per tap. The controller keeps reporting while a finger is down —
+// a single tap produced ~20 identical events, which would fire a menu button
+// many times per press.
+#define TOUCH_DEBOUNCE_MS 350
 
 // ---- microSD (SDMMC, 4-bit) ----------------------------------------------
 // Cards must be FAT32 with an MBR partition scheme. ESP-IDF returns
