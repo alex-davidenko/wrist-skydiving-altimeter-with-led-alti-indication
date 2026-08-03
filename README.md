@@ -146,7 +146,8 @@ Build the real flight thresholds instead of the bench ones:
 | `b <0-255>` | LED brightness |
 | `t` | LED colour sweep |
 | `p` | play every pattern — climb flash, all zones, landing rates, fault |
-| `c` | toggle CSV streaming |
+| `c` | toggle serial CSV streaming |
+| `l` | toggle SD logging |
 | `s` | status |
 | `?` | help |
 
@@ -369,21 +370,53 @@ miserable to debug on hardware runs on the host in under a second.
 
 ---
 
+## 7a. Jump logging and replay
+
+Every sample goes to `/LOGnnnn.CSV` on the card, a new file per power-up.
+Toggle with `l`; `s` reports the filename, row count and any drops.
+
+The log stores **both the raw sensor values and the derived ones**. The derived
+columns are recomputable, so they look redundant — but they are what makes an
+offline replay trustworthy. Recompute from the raw, compare against what the
+device actually produced in the air: if they match, the tooling is sound and
+tuning experiments mean something; if they diverge you have found a bug or a
+firmware mismatch *before* drawing conclusions. That check is impossible if only
+raw is stored. For the same reason the header records the build and every
+tuning constant in play, including QNH and the ground reference, so the file is
+self-contained.
+
+SD writes stall unpredictably — a card doing wear levelling can block 100 ms,
+which would reintroduce the loop overruns the second core just removed. So
+`push()` only appends to a lock-free SPSC ring in PSRAM (32k records, ~13
+minutes of slack) and a writer task does all the blocking I/O. If the ring ever
+does fill, the newest sample is dropped and counted rather than stalling the
+sample loop: a gap in the log is recoverable, a stalled altimeter is not.
+
+```bash
+c++ -std=gnu++17 -O2 -I lib/altimeter_core tools/replay.cpp \
+    lib/altimeter_core/*.cpp -o /tmp/replay
+/tmp/replay /Volumes/<card>/LOG0001.CSV
+```
+
+`tools/replay.cpp` links `lib/altimeter_core` directly — the same translation
+units the firmware builds — so replay cannot silently drift from the device.
+It prints a verification block first (baro maths, filter and zone agreement),
+then the jump summary: apogee, exit, freefall time and distance, opening
+altitude, canopy time, peak descent rate, and time spent in each colour zone.
+Validated against a synthetic 42,155-row jump: filter reproduced to 0.0015 m
+with zero zone mismatches.
+
+---
+
 ## 8. Roadmap
 
 Planned, roughly in order:
 
-1. **SD logging.** Log *raw pressure, temperature and timestamp* — not derived
-   altitude. That way any future filter change can be replayed against a real
-   jump without needing another jump. Card slot is SDMMC 4-bit on GPIO13-18 and
-   is confirmed working (SPCC 7.5 GB SDHC mounts under the factory demo).
-   Cards must be FAT32 with an MBR scheme; ESP-IDF returns `FR_NO_FILESYSTEM`
-   on exFAT or GPT, which is what a >32 GB card will default to on macOS.
-2. **Function button** for light sleep and wake.
-3. **Power off via the touch screen.** The AXS5106L controller is already on
+1. **Function button** for light sleep and wake.
+2. **Power off via the touch screen.** The AXS5106L controller is already on
    our I2C bus at `0x63` and answers in the boot scan, so no new wiring.
-4. **Menu with stats and jump history**, once logging exists to feed it.
-5. **Battery and power budget.** The board has VBAT, onboard charging and a
+3. **Menu with stats and jump history**, now that logging exists to feed it.
+4. **Battery and power budget.** The board has VBAT, onboard charging and a
    calibrated battery ADC (`bsp_battery` in the factory demo proves the
    hardware). Nothing in the firmware sleeps or manages charge yet, and the
    panel currently stays lit whenever powered — see `backlightPhase()`.
@@ -398,7 +431,6 @@ Planned, roughly in order:
 - **The LED-off band is disabled in flight mode**, so it blinks red all the way
   down. If you want it dark after landing, set the first flight boundary in
   `config.h` to ~15 m.
-- **No logging yet.** Serial CSV only — see the roadmap above.
 - **Sensor self-heating.** The MS5611 reads 38 C sitting on this board with the
   panel running, versus 28 C on the C3. Steady-state accuracy is fine, but the
   MS5611's compensation assumes the die and the pressure element are at the

@@ -22,6 +22,7 @@
 #include "display.h"
 #include "flight_mode.h"
 #include "led.h"
+#include "logger.h"
 #include "zones.h"
 
 // ---------------------------------------------------------------------------
@@ -303,7 +304,8 @@ static void printHelp()
     "  b <0-255>    LED brightness\n"
     "  t            LED self-test sweep\n"
     "  p            play every LED pattern (climb/zones/landing/fault)\n"
-    "  c            toggle CSV streaming\n"
+    "  c            toggle serial CSV streaming\n"
+    "  l            toggle SD logging\n"
     "  s            status\n"
     "  ?            this help"));
 }
@@ -330,6 +332,14 @@ static void printStatus()
   if (display::available())
     Serial.printf("display       : ok, full fill %lu us\n",
                   (unsigned long)display::lastFillUs());
+  if (logger::available())
+    Serial.printf("log           : %s (%llu MB card) %lu rows, %lu dropped, %s\n",
+                  logger::filename(), (unsigned long long)logger::cardSizeMb(),
+                  (unsigned long)logger::rowsWritten(),
+                  (unsigned long)logger::rowsDropped(),
+                  logger::enabled() ? "on" : "off");
+  else
+    Serial.println(F("log           : no card"));
   Serial.println(F("--------------"));
 }
 
@@ -350,6 +360,10 @@ static void handleCommand(char *line)
       resyncSampleClock();
       break;
     case 's': printStatus(); break;
+    case 'l':
+      logger::setEnabled(!logger::enabled());
+      Serial.printf("\nSD logging %s\n", logger::enabled() ? "on" : "off");
+      break;
     case '?': case 'h': printHelp(); break;
     case 'c':
       g_csvEnabled = !g_csvEnabled;
@@ -503,6 +517,9 @@ void setup()
 
   display::startTask();
 
+  logger::begin(g_qnhHpa, g_groundPHpa);
+  logger::startTask();
+
   printHelp();
 #if BENCH_MODE
   Serial.println(F("\nt_ms,p_hpa,temp_c,raw_m,filt_m,vs_mps,sigma_m,zone"));
@@ -587,6 +604,14 @@ void loop()
     {
       g_failStreak++;
     }
+
+#if BENCH_MODE
+    const uint8_t phase = 0;
+#else
+    const uint8_t phase = static_cast<uint8_t>(g_modes.mode());
+#endif
+    logger::push(now, g_pressureHpa, g_tempC, g_rawAglM, g_filter.altitude(),
+                 g_filter.velocity(), g_zones.zone(), phase);
   }
 
   const LedPattern pattern = currentPattern();

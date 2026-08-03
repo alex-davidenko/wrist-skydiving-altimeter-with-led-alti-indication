@@ -84,6 +84,27 @@
 #define DISPLAY_TASK_STACK 6144
 #define DISPLAY_TASK_PRIO  1
 
+// ---- microSD (SDMMC, 4-bit) ----------------------------------------------
+// Cards must be FAT32 with an MBR partition scheme. ESP-IDF returns
+// FR_NO_FILESYSTEM on exFAT or GPT, which is what macOS defaults to for cards
+// larger than 32 GB.
+#define LOGGER_ENABLED    1
+#define PIN_SD_CLK       16
+#define PIN_SD_CMD       15
+#define PIN_SD_D0        17
+#define PIN_SD_D1        18
+#define PIN_SD_D2        13
+#define PIN_SD_D3        14
+
+// Ring buffer sits in PSRAM. 28 bytes/record at 40 Hz is ~1.1 KB/s, so 32k
+// records is roughly 13 minutes of slack — far more than any card stall.
+#define LOG_RING_RECORDS  32768
+#define LOG_FLUSH_MS      1000   // crash costs at most this much data
+#define LOG_TICK_MS       20
+#define LOG_TASK_CORE     0      // same core as the display; neither is timed
+#define LOG_TASK_STACK    4096
+#define LOG_TASK_PRIO     1
+
 // Optional: drive the GY-63's mode straps from GPIOs instead of wiring them to
 // rails. Costs two pins and buys certainty — the firmware then guarantees I2C
 // mode and a known address regardless of what the breakout's own pull-ups do.
