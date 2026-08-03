@@ -432,6 +432,12 @@ void renderFrame(const Shared &st)
 // number underneath, so the content is intact the instant the light returns.
 bool backlightPhase(const Shared &st, uint32_t nowMs)
 {
+  // Never blink a menu. It has to stay readable while you are using it, and the
+  // altitude pattern underneath is irrelevant to what is on screen. This is not
+  // only a bench-scale annoyance: the menu would strobe when opened below 800 m
+  // in freefall, or anywhere in the 100-300 m landing ladder under canopy.
+  if (st.screen != UI_ALT) return true;
+
   // The panel stays lit even when the pattern colour is black. Black is the
   // "no alarm" state, not "no display" — at and below ground level you still
   // want to read the altitude, including negative values, on a dark screen.
