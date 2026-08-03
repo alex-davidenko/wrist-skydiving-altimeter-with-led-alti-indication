@@ -23,6 +23,8 @@ bool available() { return false; }
 
 #include <Arduino_GFX_Library.h>
 
+#include "font_alt.h"
+
 namespace display {
 
 namespace {
@@ -39,7 +41,8 @@ int16_t g_w = 0, g_h = 0;
 uint16_t g_lastBg    = 0xDEAD;
 int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
-uint8_t  g_lastAltSz = 0;
+const GFXfont *g_lastFont = nullptr;
+uint8_t  g_lastLen   = 0;
 
 // State handed over from the sample loop on the other core. Small enough that
 // a spinlock costs nothing; a mutex would risk blocking the sample loop.
@@ -249,7 +252,7 @@ void message(const char *line1, const char *line2)
   g_lastBg = 0xDEAD;          // force a full repaint on the next frame
   g_lastAlt = INT32_MIN;
   g_lastVs = INT32_MIN;
-  g_lastAltSz = 0;
+  g_lastFont = nullptr;
 }
 
 namespace {
@@ -372,9 +375,9 @@ void renderFrame(const Shared &st)
   {
     fillAll(bg);
     g_lastBg    = bg;
-    g_lastAlt   = INT32_MIN;   // everything on top must be redrawn
-    g_lastVs    = INT32_MIN;
-    g_lastAltSz = 0;
+    g_lastAlt  = INT32_MIN;    // everything on top must be redrawn
+    g_lastVs   = INT32_MIN;
+    g_lastFont = nullptr;
   }
 
   // Altitude in whole metres, as large as will fit. The label that used to sit
@@ -385,31 +388,36 @@ void renderFrame(const Shared &st)
   snprintf(buf, sizeof(buf), "%ld", (long)alt);
   const uint8_t len = strlen(buf);
 
-  // Widest size that fits both the width (for this many digits) and the height
-  // of the band above the vertical-speed line.
+  // Two typefaces baked at the size they are drawn, rather than one small font
+  // magnified: scaling the built-in 5x7 by ~17 turned every source pixel into a
+  // 17x17 block, which is what made the digits look choppy. Big fits 3 glyphs
+  // across, Med fits 4 — see tools/make_font.py.
   const int16_t band = g_h - ALT_BOTTOM_BAND;
-  uint8_t sz = (g_w - 12) / (len * 6);
-  const uint8_t szByHeight = band / 8;
-  if (sz > szByHeight) sz = szByHeight;
-  if (sz > ALT_TEXT_SIZE_MAX) sz = ALT_TEXT_SIZE_MAX;
-  if (sz < 1) sz = 1;
+  const GFXfont *font = (len <= 3) ? &FontAltBig : &FontAltMed;
 
-  if (alt != g_lastAlt || sz != g_lastAltSz)
+  if (alt != g_lastAlt || font != g_lastFont)
   {
-    // A shorter number, or a smaller size, would leave the old glyphs behind.
-    // Opaque text only covers its own cells, so clear the band on any change
-    // of geometry. Digit-count changes are rare, so this is cheap in practice.
-    if (sz != g_lastAltSz) g_gfx->fillRect(0, 0, g_w, band, bg);
+    // Opaque text only covers its own cells, so a change of font or digit count
+    // — which moves every glyph — can strand old ink. Clear the band then.
+    // Same-length updates redraw in place and stay flicker-free.
+    if (font != g_lastFont || len != g_lastLen) g_gfx->fillRect(0, 0, g_w, band, bg);
 
-    const int16_t tw = len * 6 * sz;
-    const int16_t th = 8 * sz;
+    g_gfx->setFont(font);
+    g_gfx->setTextSize(1, 1, 0);
     g_gfx->setTextColor(ink, bg);
-    g_gfx->setTextSize(sz, sz, 0);
-    g_gfx->setCursor((g_w - tw) / 2, (band - th) / 2);
-    g_gfx->print(buf);
 
-    g_lastAlt   = alt;
-    g_lastAltSz = sz;
+    // Custom fonts place the cursor on the baseline, not the top-left, so ask
+    // for the bounding box and offset the cursor by its origin.
+    int16_t bx, by;
+    uint16_t bw, bh;
+    g_gfx->getTextBounds(buf, 0, 0, &bx, &by, &bw, &bh);
+    g_gfx->setCursor((g_w - (int16_t)bw) / 2 - bx, (band - (int16_t)bh) / 2 - by);
+    g_gfx->print(buf);
+    g_gfx->setFont(NULL);          // built-in font for everything else
+
+    g_lastAlt  = alt;
+    g_lastFont = font;
+    g_lastLen  = len;
   }
 
   // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.

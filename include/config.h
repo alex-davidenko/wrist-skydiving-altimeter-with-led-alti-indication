@@ -68,10 +68,8 @@
 // 0/2 = portrait 172x320, 1/3 = landscape 320x172. Landscape gives the
 // altitude number far more room, so it is the default.
 #define DISPLAY_ROTATION  1
-// The altitude glyph size is chosen at runtime as the largest that fits the
-// digit count, capped here. Base font is 5x7, so size N is 6N px per digit
-// advance and 8N px tall.
-#define ALT_TEXT_SIZE_MAX  17
+// The altitude uses baked typefaces from tools/make_font.py, picked at runtime
+// by digit count — see renderFrame(). Nothing to configure here.
 #define ALT_BOTTOM_BAND    26   // px reserved at the bottom for vertical speed
 #define DISPLAY_PERIOD_MS  50   // 20 Hz content redraw
 // Backlight blink resolution. The task ticks this fast so blink edges are

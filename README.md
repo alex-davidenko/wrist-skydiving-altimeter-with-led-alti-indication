@@ -339,10 +339,25 @@ struct copy, and never touches SPI.
 The screen is driven from the same `LedPattern` the LED uses, so both outputs
 agree by construction rather than by a second colour table kept in step by hand.
 
-The altitude glyph size is picked at runtime as the largest that fits the digit
-count — a single-digit bench reading fills the screen, a four-digit flight
-altitude shrinks to fit. There is no zone label: the background colour already
-says which zone you are in, so the text was redundant.
+The altitude is drawn in a real typeface (Avenir Next Bold) baked at the size it
+is actually displayed. It was previously the built-in 5x7 font magnified ~17x,
+which turns every source pixel into a 17x17 block — legible but visibly choppy.
+`tools/make_font.py` rasterises the glyphs into GFX font data:
+
+```bash
+.venv/bin/python tools/make_font.py > src/font_alt.h
+```
+
+Two sizes are baked and chosen at runtime by digit count — 116 px for up to
+three digits, 86 px for four — because a GFX font cannot be scaled without
+going blocky again, and `GFXglyph.yOffset` is `int8_t`, capping any glyph at
+127 px tall. The generator sizes each font to the widest string it must fit
+rather than to a guessed height. Digits are tabular (one uniform advance, each
+glyph centred in it) so a live-updating altitude does not jitter sideways as
+digits change. Cost is 18 KB of flash.
+
+There is no zone label: the background colour already says which zone you are
+in, so the text was redundant.
 
 **Sampling** is 40 Hz. The library's `read()` is blocking and does a pressure
 conversion followed by a temperature conversion — ~20 ms total at
