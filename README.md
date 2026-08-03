@@ -82,14 +82,28 @@ Free on the headers: GPIO1-6, GPIO7, GPIO8, GPIO10.
 
 PlatformIO is installed in a local venv (nothing was added to your system):
 
+Two firmware environments, same source, one flag apart:
+
+| environment | thresholds | use |
+|---|---|---|
+| `bench` | divided by 1000 | testing by hand on a desk (default) |
+| **`flight`** | the real ones | **this is what you jump with** |
+
 ```bash
-.venv/bin/pio run --target upload && .venv/bin/pio device monitor
+.venv/bin/pio run -e flight --target upload && .venv/bin/pio device monitor
 ```
 
-In VS Code: PlatformIO sidebar → Project Tasks → **s3lcd → General → Upload
+In VS Code: PlatformIO sidebar → Project Tasks → **flight → General → Upload
 and Monitor**.
 
-**If the S3 link step fails** with `undefined reference to _cleanup_r` or
+They are separate environments rather than separate branches deliberately: a
+production branch would diverge from this one and need merging forever, while a
+build flag cannot drift. Both are built and tested on every change.
+
+The boot log and the startup screen both name the mode, so which build is on
+the board is never a guess.
+
+**If the link step fails** with `undefined reference to _cleanup_r` or
 `_Unwind_SetEnableExceptionFdeSorting`, the Xtensa toolchain package is
 corrupted — its manifest claims 8.4.0 while the directory actually holds GCC
 14.2.0, so Arduino 2.0.17's precompiled libs get linked by the wrong compiler.
@@ -103,12 +117,6 @@ Run the host-side logic tests (no hardware needed):
 
 ```bash
 .venv/bin/pio test -e native
-```
-
-Build the real flight thresholds instead of the bench ones:
-
-```bash
-.venv/bin/pio run -D BENCH_MODE=0 --target upload
 ```
 
 ---
