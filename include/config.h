@@ -12,7 +12,7 @@
 // 1 = BENCH: thresholds scaled to desk height (metres instead of kilometres)
 //            so the zone logic can be exercised by lifting the board by hand.
 // 0 = FLIGHT: the real skydiving thresholds.
-// Override from the command line with: pio run -e devkitm1 -D BENCH_MODE=0
+// Override from the command line with: pio run -D BENCH_MODE=0
 #ifndef BENCH_MODE
 #define BENCH_MODE 1
 #endif
@@ -26,14 +26,10 @@
 #define LED_DRIVER_NONE       3   // no LED at all — serial/console only
 
 // ===========================================================================
-//  PINS
+//  PINS  (Waveshare ESP32-S3-Touch-LCD-1.47)
 // ===========================================================================
 #define I2C_FREQ_HZ   400000
 
-#if defined(BOARD_S3_LCD_147)
-// ---------------------------------------------------------------------------
-//  Waveshare ESP32-S3-Touch-LCD-1.47
-// ---------------------------------------------------------------------------
 // GPIO41/42 are this board's I2C bus. It is shared with the capacitive touch
 // controller and is broken out on the right-hand header, which is exactly
 // where the GY-63 wants to go — no extra pins needed.
@@ -83,42 +79,6 @@
 #define PIN_SENSOR_CSB   11    // LOW -> address 0x77, HIGH -> 0x76
 #define SENSOR_CSB_LEVEL  0    // 0 = LOW = 0x77
 
-#else
-// ---------------------------------------------------------------------------
-//  ESP32-C3-DevKitM-1 / DevKitC-02  (the original board)
-// ---------------------------------------------------------------------------
-// GPIO4/5 are plain GPIOs on the C3 — not strapping pins, not USB, not
-// UART0 — so they are the safe default.
-#define PIN_I2C_SDA   4
-#define PIN_I2C_SCL   5
-
-// Onboard addressable RGB LED on the DevKitM-1.
-#define LED_DRIVER    LED_DRIVER_NEOPIXEL
-#define PIN_LED       8
-
-// Only used when LED_DRIVER is one of the discrete RGB options.
-#define PIN_LED_R     3
-#define PIN_LED_G     6
-#define PIN_LED_B     7
-
-// BOOT button. Already has a pull-up and a cap on the devkit; active LOW.
-// Note: it is a strapping pin, so holding it during reset enters the
-// bootloader. That is expected and harmless.
-#define PIN_BUTTON    9
-#define BUTTON_ACTIVE_LOW 1
-
-// No panel on the C3.
-#define DISPLAY_ENABLED   0
-#define DISPLAY_ROTATION  0
-#define ALT_TEXT_SIZE     8
-#define DISPLAY_PERIOD_MS 100
-
-// The GY-63's own pull-ups already strap PS high for I2C on this board.
-#define PIN_SENSOR_PS    -1
-#define PIN_SENSOR_CSB   -1
-#define SENSOR_CSB_LEVEL  0
-
-#endif
 
 // 0-255. The onboard WS2812 is retina-searing indoors; turn this up when you
 // move to an external high-power LED for daylight use.

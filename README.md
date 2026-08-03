@@ -1,6 +1,6 @@
 # Wrist altimeter — phase 1
 
-ESP32-C3 + MS5611 (GY-63) → filtered altitude → colour-coded LED.
+ESP32-S3 + MS5611 (GY-63) → filtered altitude → colour-coded 172×320 panel.
 
 Three flight phases, chosen automatically from vertical speed:
 
@@ -18,10 +18,7 @@ Three flight phases, chosen automatically from vertical speed:
 
 ## 1. Wiring
 
-Two boards are supported. Pins are selected by the `BOARD_S3_LCD_147` build
-flag, set per-environment in `platformio.ini`.
-
-### Waveshare ESP32-S3-Touch-LCD-1.47  (`-e s3lcd`)
+Target board: **Waveshare ESP32-S3-Touch-LCD-1.47**.
 
 | GY-63 | ESP32-S3 | Notes |
 |-------|----------|-------|
@@ -44,9 +41,10 @@ the I2C spec's 3 mA, so it works, but do not add more. If the bus misbehaves,
 lifting the GY-63's pull-ups is the first thing to try.
 
 **No user RGB LED on this board** — GPIO38 is LCD_CLK here, unlike the non-touch
-`ESP32-S3-LCD-1.47`, which has a different pinout entirely. The build defaults to
-an external WS2812 on **GPIO7**; driving that pin is harmless if nothing is
-attached. Set `LED_DRIVER_NONE` to silence it.
+`ESP32-S3-LCD-1.47`, which has a different pinout entirely. The panel is the
+primary output. The build also defaults to an external WS2812 on **GPIO7**;
+driving that pin is harmless if nothing is attached, and `LED_DRIVER_NONE`
+silences it.
 
 **Serial is native USB CDC** — there is one USB-C socket wired straight to the
 S3, no UART bridge. `ARDUINO_USB_CDC_ON_BOOT=1` is required and already set.
@@ -78,42 +76,6 @@ Occupied, do not use: GPIO38/39/21/45/40/46 (LCD), GPIO47/48 (touch RST/INT),
 GPIO13-18 (SD card), GPIO43/44 (UART0), GPIO33-37 (octal PSRAM).
 Free on the headers: GPIO1-6, GPIO7, GPIO8, GPIO10.
 
-### ESP32-C3-DevKitM-1  (`-e devkitm1`)
-
-The GY-63 breakout carries the MS5611 plus an LDO and (on most variants)
-level shifters.
-
-| GY-63 | ESP32-C3-DevKitM-1 | Notes |
-|-------|--------------------|-------|
-| VCC   | **3V3**            | See note below — do not use 5V unless you are sure |
-| GND   | GND                | |
-| SDA   | **GPIO4**          | |
-| SCL   | **GPIO5**          | |
-| PS    | **3V3** (or leave) | PS high = I2C, PS low = SPI |
-| CSB   | leave floating     | floating/GND → address 0x77, to VCC → 0x76 |
-
-**Confirmed working on this build:** sensor answers at `0x77`, PROM reads
-`C1=40487 C2=37849 C3=24388 C4=23235 C5=32485 C6=26844` — all in the normal
-20000–60000 range for a genuine die.
-
-**On VCC:** the MS5611 die is a 3.3 V part with a 3.6 V absolute maximum.
-Boards *with* the onboard LDO tolerate 5 V; bare breakouts do not, and 5 V
-will kill them. 3.3 V is safe on **both** — a regulated board just runs its
-LDO in dropout, and the MS5611 is happy down to 1.8 V. Use 3.3 V.
-
-**On PS:** most GY-63 boards have PS pulled high already, so I2C is the
-default. If the I2C scan at boot finds nothing, this is the first thing to
-check — a board strapped for SPI will be completely silent on I2C.
-
-**Pull-ups:** the GY-63 has its own 4.7 kΩ pull-ups on SDA/SCL. Don't add more.
-
-**Which USB socket:** the DevKitM-1 has two. Use the one marked **UART** —
-that is what `platformio.ini` is configured for. If you use the one marked
-**USB**, flip both `ARDUINO_USB_*` flags to `1` in `platformio.ini`.
-
-GPIO4/5 were chosen because they are plain GPIOs — not strapping pins, not
-the USB pair (18/19), not UART0 (20/21).
-
 ---
 
 ## 2. Build and flash
@@ -121,14 +83,11 @@ the USB pair (18/19), not UART0 (20/21).
 PlatformIO is installed in a local venv (nothing was added to your system):
 
 ```bash
-.venv/bin/pio run -e devkitm1 --target upload && .venv/bin/pio device monitor
+.venv/bin/pio run --target upload && .venv/bin/pio device monitor
 ```
 
-For the S3 board:
-
-```bash
-.venv/bin/pio run -e s3lcd --target upload && .venv/bin/pio device monitor
-```
+In VS Code: PlatformIO sidebar → Project Tasks → **s3lcd → General → Upload
+and Monitor**.
 
 **If the S3 link step fails** with `undefined reference to _cleanup_r` or
 `_Unwind_SetEnableExceptionFdeSorting`, the Xtensa toolchain package is
@@ -149,22 +108,22 @@ Run the host-side logic tests (no hardware needed):
 Build the real flight thresholds instead of the bench ones:
 
 ```bash
-.venv/bin/pio run -e devkitm1 -D BENCH_MODE=0 --target upload
+.venv/bin/pio run -D BENCH_MODE=0 --target upload
 ```
 
 ---
 
 ## 3. Bring-up order
 
-1. **Power only.** Plug in the C3 with nothing else attached. The onboard LED
-   should sweep red→yellow→green→blue→magenta at boot. That confirms the LED
-   path before you trust any colour it shows you later.
+1. **Power only.** Plug the board in with nothing else attached. The panel
+   should light and show the boot message. That confirms the display path
+   before you trust any colour it shows you later.
 2. **Wire the GY-63, then watch the boot log.** You should see the I2C scan
    report a device at `0x77` (or `0x76`), then `MS5611 found at 0x…`.
    If the scan is empty: check PS, check 3V3/GND, check SDA/SCL are not swapped.
-   If the sensor is not found, the LED sits in a **fast magenta blink** — that
-   is the sensor-fault pattern, and it is deliberately impossible to confuse
-   with any altitude colour.
+   If the sensor is not found, the screen goes magenta and the LED (if fitted)
+   blinks fast magenta — the sensor-fault pattern, deliberately impossible to
+   confuse with any altitude colour.
 3. **Check the pressure is not exactly half.** See §6 — this board needs
    `SENSOR_MATH_MODE 1`, and the firmware now warns loudly at boot if the
    reading is outside 500–1085 hPa.
