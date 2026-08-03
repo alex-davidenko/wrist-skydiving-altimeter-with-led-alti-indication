@@ -15,7 +15,7 @@ const Rgb kYellow  = {255, 150,   0};  // amber rather than 255,255,0 — reads 
                                        // clearly distinct from green on a
                                        // cheap WS2812
 const Rgb kGreen   = {  0, 255,   0};
-const Rgb kBlue    = {  0,  60, 255};
+const Rgb kBlue    = { 60, 140, 255};  // light enough for black digits
 const Rgb kMagenta = {255,   0, 200};
 const Rgb kWhite   = {255, 255, 255};
 

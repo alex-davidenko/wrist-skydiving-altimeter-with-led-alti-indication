@@ -144,15 +144,21 @@ uint16_t rgb565(const Rgb &c)
   return ((c.r & 0xF8) << 8) | ((c.g & 0xFC) << 3) | (c.b >> 3);
 }
 
-// Pick black or white text from the background's luminance, so yellow and
-// green stay readable instead of glowing white-on-white.
+// Digits are BLACK on every colour the device shows, and white only on a dark
+// background where black would be invisible.
+//
+// This is a daylight decision, not an aesthetic one. Outdoors the panel cannot
+// outshine the sun, so emitted white washes out — but black pixels stay black,
+// because they are simply not emitting. Dark-on-bright is the only contrast
+// that survives in direct sunlight, which is the environment this thing has to
+// work in. Indoors white-on-colour looks nicer; outdoors it disappears.
 uint16_t inkFor(uint16_t bg565)
 {
   const uint8_t r = ((bg565 >> 11) & 0x1F) << 3;
   const uint8_t g = ((bg565 >> 5) & 0x3F) << 2;
   const uint8_t b = (bg565 & 0x1F) << 3;
   const uint16_t luma = (r * 77 + g * 150 + b * 29) >> 8;
-  return (luma > 140) ? RGB565_BLACK : RGB565_WHITE;
+  return (luma > 30) ? RGB565_BLACK : RGB565_WHITE;
 }
 
 void fillAll(uint16_t c)
@@ -303,9 +309,10 @@ void renderFrame(const Shared &st)
 // number underneath, so the content is intact the instant the light returns.
 bool backlightPhase(const Shared &st, uint32_t nowMs)
 {
-  // A black pattern means "show nothing" — kill the backlight rather than
-  // lighting a black screen.
-  if (st.color.r == 0 && st.color.g == 0 && st.color.b == 0) return false;
+  // The panel stays lit even when the pattern colour is black. Black is the
+  // "no alarm" state, not "no display" — at and below ground level you still
+  // want to read the altitude, including negative values, on a dark screen.
+  // Only an actual blink pattern turns the light off.
   if (st.periodMs == 0) return true;
   return (nowMs % st.periodMs) < (st.periodMs / 2u);
 }
