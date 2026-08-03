@@ -1,6 +1,6 @@
 #pragma once
 //
-// Minimal AXS5106L capacitive touch reader.
+// Minimal AXS5106L capacitive touch reader with tap/swipe gestures.
 //
 // Shares the I2C bus with the MS5611 — touch answers at 0x63, the barometer at
 // 0x77, so there is no conflict and no extra wiring. Protocol is small enough
@@ -8,33 +8,42 @@
 // bytes from register 0x01. data[1] is the touch count, followed by 12-bit
 // X/Y pairs.
 //
-// Touch-down is detected from the INT line's falling edge, the same way
-// Waveshare's driver does it, so we are not polling a bus the sample loop also
-// needs.
+// GESTURES. The controller has no notion of press/release — it simply keeps
+// reporting while a finger is down, firing the INT line each time. So a
+// "release" is inferred from the reports stopping. A gesture accumulates the
+// first and last positions of a contact, and is classified once the reports
+// go quiet: mostly-horizontal movement is a swipe, anything else is a tap at
+// the point where the finger landed.
 //
 
 #include <Arduino.h>
 
 namespace touch {
 
-struct Point
+enum EventType : uint8_t
 {
-  int16_t x, y;      // already mapped into display coordinates
-  bool    valid;
+  EV_NONE = 0,
+  EV_TAP,
+  EV_SWIPE_LEFT,     // finger moved right -> left
+  EV_SWIPE_RIGHT
+};
+
+struct Event
+{
+  EventType type;
+  int16_t   x, y;    // where the contact started, in display coordinates
 };
 
 // Returns false if the controller does not answer; everything else no-ops.
 bool begin();
 bool available();
 
-// Most recent touch-down since the last call, or {invalid} if none.
-// Consumes the event, so a single tap is reported exactly once.
-Point takeTouch();
+// Completed gesture since the last call, or EV_NONE. Consumes the event, so a
+// gesture is reported exactly once. Call frequently — release detection is
+// driven from this.
+Event takeEvent();
 
-// Raw controller coordinates of the last touch, for calibration. The mapping
-// from these to display coordinates cannot be derived from the datasheet alone
-// — it depends on how the panel is mounted — so `T` on the console prints both
-// and TOUCH_SWAP_XY / TOUCH_FLIP_X / TOUCH_FLIP_Y in config.h correct it.
+// Raw controller coordinates of the last contact, for calibration.
 void rawLast(int16_t *x, int16_t *y);
 
 }  // namespace touch

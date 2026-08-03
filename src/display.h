@@ -35,7 +35,9 @@ namespace display {
 enum UiScreen : uint8_t
 {
   UI_ALT = 0,          // normal altitude display
-  UI_MENU,
+  UI_MENU,             // page 1: ZERO / POWER OFF
+  UI_MENU2,            // page 2: UNMOUNT CARD
+  UI_CONFIRM_ZERO,
   UI_CONFIRM_UNMOUNT,
   UI_CONFIRM_POWER,
   UI_BANNER            // plain two-line message
@@ -44,6 +46,7 @@ enum UiScreen : uint8_t
 enum UiAction : uint8_t
 {
   ACT_NONE = 0,
+  ACT_ZERO,
   ACT_UNMOUNT,
   ACT_POWER,
   ACT_CANCEL,

@@ -7,7 +7,7 @@
 namespace touch {
 bool begin() { return false; }
 bool available() { return false; }
-Point takeTouch() { return {0, 0, false}; }
+Event takeEvent() { return {EV_NONE, 0, 0}; }
 void rawLast(int16_t *x, int16_t *y) { *x = 0; *y = 0; }
 }  // namespace touch
 
@@ -26,10 +26,14 @@ constexpr uint8_t kRegTouch    = 0x01;
 bool g_ok = false;
 volatile bool g_intFlag = false;
 
-uint32_t g_lastEventMs = 0;
 int16_t g_rawX = 0, g_rawY = 0;
-int16_t g_pendX = 0, g_pendY = 0;
-volatile bool g_pending = false;
+
+// Contact in progress: where it started, where it is now, and when we last
+// heard from it. Absence of reports is what stands in for a release event.
+bool     g_active  = false;
+int16_t  g_startX = 0, g_startY = 0;
+int16_t  g_lastX  = 0, g_lastY  = 0;
+uint32_t g_lastMs = 0;
 
 void IRAM_ATTR onTouchInt() { g_intFlag = true; }
 
@@ -104,10 +108,10 @@ bool begin()
   return true;
 }
 
-Point takeTouch()
+Event takeEvent()
 {
-  Point p{0, 0, false};
-  if (!g_ok) return p;
+  Event e{EV_NONE, 0, 0};
+  if (!g_ok) return e;
 
   if (g_intFlag)
   {
@@ -115,30 +119,38 @@ Point takeTouch()
     uint8_t d[14] = {0};
     if (readReg(kRegTouch, d, sizeof(d)) && d[1] > 0)
     {
-      // The controller keeps reporting while a finger is down — one tap
-      // produced ~20 identical events in testing. Collapse a press into a
-      // single event, or every menu button would fire many times per touch.
-      const uint32_t now = millis();
-      if (static_cast<uint32_t>(now - g_lastEventMs) < TOUCH_DEBOUNCE_MS)
-      {
-        return p;
-      }
-      g_lastEventMs = now;
       g_rawX = (int16_t)((((uint16_t)(d[2] & 0x0F)) << 8) | d[3]);
       g_rawY = (int16_t)((((uint16_t)(d[4] & 0x0F)) << 8) | d[5]);
-      mapToDisplay(g_rawX, g_rawY, &g_pendX, &g_pendY);
-      g_pending = true;
+      int16_t x, y;
+      mapToDisplay(g_rawX, g_rawY, &x, &y);
+
+      if (!g_active)
+      {
+        g_active = true;
+        g_startX = x;
+        g_startY = y;
+      }
+      g_lastX = x;
+      g_lastY = y;
+      g_lastMs = millis();
     }
   }
 
-  if (g_pending)
+  // The contact has gone quiet for long enough to call it a release.
+  if (g_active && static_cast<uint32_t>(millis() - g_lastMs) > TOUCH_RELEASE_MS)
   {
-    g_pending = false;
-    p.x = g_pendX;
-    p.y = g_pendY;
-    p.valid = true;
+    g_active = false;
+    const int16_t dx = g_lastX - g_startX;
+    const int16_t dy = g_lastY - g_startY;
+
+    e.x = g_startX;
+    e.y = g_startY;
+    if (abs(dx) >= TOUCH_SWIPE_MIN_PX && abs(dx) > abs(dy))
+      e.type = (dx < 0) ? EV_SWIPE_LEFT : EV_SWIPE_RIGHT;
+    else
+      e.type = EV_TAP;
   }
-  return p;
+  return e;
 }
 
 }  // namespace touch

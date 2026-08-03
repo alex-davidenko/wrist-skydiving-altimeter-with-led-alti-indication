@@ -106,10 +106,12 @@
 #define TOUCH_SWAP_XY     1
 #define TOUCH_FLIP_X      0
 #define TOUCH_FLIP_Y      0
-// One event per tap. The controller keeps reporting while a finger is down —
-// a single tap produced ~20 identical events, which would fire a menu button
-// many times per press.
-#define TOUCH_DEBOUNCE_MS 350
+// The controller has no press/release notion — it just keeps reporting while a
+// finger is down (~20 reports per tap). A release is inferred from the reports
+// stopping for this long, at which point the contact is classified.
+#define TOUCH_RELEASE_MS    120
+// Horizontal travel needed to count as a swipe rather than a tap.
+#define TOUCH_SWIPE_MIN_PX   60
 
 // ---- microSD (SDMMC, 4-bit) ----------------------------------------------
 // Cards must be FAT32 with an MBR partition scheme. ESP-IDF returns

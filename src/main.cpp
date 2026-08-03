@@ -318,16 +318,43 @@ static void powerOff()
   esp_deep_sleep_start();
 }
 
-static void handleTouch(int16_t x, int16_t y)
+static void zeroFromMenu()
+{
+  display::setBanner("ZEROING", "hold still");
+  const bool ok = zeroHere();
+  resyncSampleClock();
+  display::setBanner(ok ? "ZERO OK" : "ZERO FAILED", ok ? "" : "try again");
+  delay(1400);
+  closeMenu();
+}
+
+static void handleGesture(const touch::Event &e)
 {
   g_menuIdleMs = millis();
-  switch (display::hitTest(x, y))
+  const uint8_t scr = display::screen();
+
+  // Swipes page between the menu screens; they mean nothing on a confirm.
+  if (e.type == touch::EV_SWIPE_LEFT && scr == display::UI_MENU)
   {
+    display::setScreen(display::UI_MENU2);
+    return;
+  }
+  if (e.type == touch::EV_SWIPE_RIGHT && scr == display::UI_MENU2)
+  {
+    display::setScreen(display::UI_MENU);
+    return;
+  }
+  if (e.type != touch::EV_TAP) return;
+
+  switch (display::hitTest(e.x, e.y))
+  {
+    case display::ACT_ZERO:    display::setScreen(display::UI_CONFIRM_ZERO);    break;
     case display::ACT_UNMOUNT: display::setScreen(display::UI_CONFIRM_UNMOUNT); break;
     case display::ACT_POWER:   display::setScreen(display::UI_CONFIRM_POWER);   break;
     case display::ACT_CONFIRM:
-      if (display::screen() == display::UI_CONFIRM_POWER) powerOff();
-      else                                                unmountCard();
+      if      (scr == display::UI_CONFIRM_POWER) powerOff();
+      else if (scr == display::UI_CONFIRM_ZERO)  zeroFromMenu();
+      else                                       unmountCard();
       break;
     case display::ACT_CANCEL:  closeMenu(); break;
     default: break;
@@ -655,16 +682,20 @@ void loop()
 
   if (touch::available())
   {
-    const touch::Point t = touch::takeTouch();
-    if (t.valid)
+    const touch::Event e = touch::takeEvent();
+    if (e.type != touch::EV_NONE)
     {
       if (g_touchDump)
       {
         int16_t rx, ry;
         touch::rawLast(&rx, &ry);
-        Serial.printf("touch raw=(%4d,%4d) -> mapped=(%4d,%4d)\n", rx, ry, t.x, t.y);
+        Serial.printf("touch %s raw=(%4d,%4d) -> start=(%4d,%4d)\n",
+                      e.type == touch::EV_TAP        ? "TAP  "
+                    : e.type == touch::EV_SWIPE_LEFT ? "SWIPE<"
+                                                     : "SWIPE>",
+                      rx, ry, e.x, e.y);
       }
-      if (display::screen() != display::UI_ALT) handleTouch(t.x, t.y);
+      if (display::screen() != display::UI_ALT) handleGesture(e);
     }
   }
 

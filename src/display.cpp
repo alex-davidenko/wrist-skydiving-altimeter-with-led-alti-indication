@@ -61,8 +61,9 @@ volatile bool g_suspended = false;
 // Button rectangles. hitTest() and the renderer both read these, so a button
 // can never be drawn somewhere other than where it responds.
 struct Rect { int16_t x, y, w, h; };
-constexpr Rect kBtnLeft  = { 20, 45, 132, 100};
-constexpr Rect kBtnRight = {168, 45, 132, 100};
+constexpr Rect kBtnLeft  = { 20, 40, 132,  95};
+constexpr Rect kBtnRight = {168, 40, 132,  95};
+constexpr Rect kBtnWide  = { 60, 40, 200,  95};   // single-button pages
 
 bool inside(const Rect &r, int16_t x, int16_t y)
 {
@@ -272,6 +273,33 @@ void drawButton(const Rect &r, uint16_t fill, const char *l1, const char *l2)
   }
 }
 
+// Two dots at the bottom, filled for the current page, plus an arrow on the
+// side that has somewhere to go. Without this there is nothing to tell you a
+// second page exists.
+void drawPager(uint8_t page, uint8_t pages)
+{
+  const int16_t cx = DISPLAY_W / 2;
+  const int16_t y  = DISPLAY_H - 13;
+  for (uint8_t i = 0; i < pages; i++)
+  {
+    const int16_t x = cx + (int16_t)(i * 18) - (int16_t)((pages - 1) * 9);
+    if (i == page) g_gfx->fillCircle(x, y, 5, RGB565_WHITE);
+    else           g_gfx->drawCircle(x, y, 5, RGB565_WHITE);
+  }
+  g_gfx->setTextSize(1, 1, 0);
+  g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+  if (page + 1 < pages)
+  {
+    g_gfx->setCursor(DISPLAY_W - 66, y - 3);
+    g_gfx->print("swipe <");
+  }
+  if (page > 0)
+  {
+    g_gfx->setCursor(8, y - 3);
+    g_gfx->print("> swipe");
+  }
+}
+
 void renderUi(const Shared &st)
 {
   g_gfx->fillScreen(RGB565_BLACK);
@@ -281,16 +309,27 @@ void renderUi(const Shared &st)
   switch (st.screen)
   {
     case UI_MENU:
-      g_gfx->setCursor(20, 14);
-      g_gfx->print("MENU   (tap outside = back)");
-      drawButton(kBtnLeft,  RGB565_BLUE,   "UNMOUNT", "CARD");
-      drawButton(kBtnRight, RGB565_ORANGE, "POWER",   "OFF");
+      g_gfx->setCursor(20, 12);
+      g_gfx->print("MENU");
+      drawButton(kBtnLeft,  RGB565_GREEN,  "ZERO",  "HERE");
+      drawButton(kBtnRight, RGB565_ORANGE, "POWER", "OFF");
+      drawPager(0, 2);
       break;
 
+    case UI_MENU2:
+      g_gfx->setCursor(20, 12);
+      g_gfx->print("MENU");
+      drawButton(kBtnWide, RGB565_BLUE, "UNMOUNT", "CARD");
+      drawPager(1, 2);
+      break;
+
+    case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:
     case UI_CONFIRM_POWER:
-      g_gfx->setCursor(20, 14);
-      g_gfx->print(st.screen == UI_CONFIRM_UNMOUNT ? "UNMOUNT CARD?" : "POWER OFF?");
+      g_gfx->setCursor(20, 12);
+      g_gfx->print(st.screen == UI_CONFIRM_UNMOUNT ? "UNMOUNT CARD?"
+                 : st.screen == UI_CONFIRM_POWER   ? "POWER OFF?"
+                                                   : "SET ZERO HERE?");
       drawButton(kBtnLeft,  RGB565_BLACK, "CANCEL", "");
       drawButton(kBtnRight, RGB565_RED,   "YES",    "");
       break;
@@ -478,9 +517,13 @@ uint8_t hitTest(int16_t x, int16_t y)
   switch (screen())
   {
     case UI_MENU:
-      if (inside(kBtnLeft, x, y))  return ACT_UNMOUNT;
+      if (inside(kBtnLeft, x, y))  return ACT_ZERO;
       if (inside(kBtnRight, x, y)) return ACT_POWER;
       return ACT_CANCEL;                       // anywhere else backs out
+    case UI_MENU2:
+      if (inside(kBtnWide, x, y))  return ACT_UNMOUNT;
+      return ACT_CANCEL;
+    case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:
     case UI_CONFIRM_POWER:
       if (inside(kBtnRight, x, y)) return ACT_CONFIRM;
