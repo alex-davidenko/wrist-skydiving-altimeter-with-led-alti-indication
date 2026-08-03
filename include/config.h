@@ -70,7 +70,9 @@
 #define DISPLAY_ROTATION  1
 // The altitude uses baked typefaces from tools/make_font.py, picked at runtime
 // by digit count — see renderFrame(). Nothing to configure here.
-#define ALT_BOTTOM_BAND    26   // px reserved at the bottom for vertical speed
+// Vertical speed sits in a strip along the TOP, so the altitude digits own
+// everything below it and cannot be clipped by the readout.
+#define ALT_TOP_BAND       26
 #define DISPLAY_PERIOD_MS  50   // 20 Hz content redraw
 // Backlight blink resolution. The task ticks this fast so blink edges are
 // crisp; only the GPIO is touched at this rate, not the panel.
@@ -207,6 +209,11 @@
 //         noise cancels in a mean but a trend does not. It can be tight: the
 //         standard error of each half-mean is only ~0.035 m at bench scale.
 #define ZERO_MAX_DRIFT_M      (BENCH_MODE ? 0.20f : 1.00f)
+// Demo jump playback. The real profile is nearly four minutes, so altitude runs
+// on a compressed clock; blink rates stay on the real clock so 3 Hz and 6 Hz
+// look exactly as they will in the air.
+#define DEMO_SPEED           5.0f
+
 // Menu closes itself so it can never sit over the altitude during a jump.
 #define MENU_TIMEOUT_MS      15000
 // Power-off is refused above this vertical speed. Shutting down mid-jump is
@@ -275,6 +282,42 @@
 // ===========================================================================
 // Order matches the Zone enum: bounds[i] separates zone i from zone i+1.
 //   OFF | BLINK_RED | RED | YELLOW | GREEN | ABOVE
+// The flight ladders are defined unconditionally rather than inside the
+// BENCH_MODE branch, because the demo jump replays a 4200 m profile and has to
+// show flight behaviour even from a bench build — against metre-scale bench
+// bands it would sit in a single colour the whole way down.
+// Flight uses ASYMMETRIC damping. Dropping a zone means danger increasing and
+// commits almost immediately; climbing back is damped hard. Measured on a
+// 50 m/s descent through the 800 m threshold:
+//   symmetric  (5 m / 120 ms both ways) -> LED lights 11.2 m late (225 ms)
+//   asymmetric (0 m / 50 ms urgent)     -> LED lights  ~2-3 m late
+// The urgent dwell is 50 ms rather than 25 ms because 25 ms false-alarms:
+// injecting one 30 m bad read every 50 s while hovering above a threshold
+// produced 24 spurious blink-reds in 20 minutes at 25 ms, and zero at 50 ms.
+// A false blink-red is a safe failure, but false alarms destroy trust in the
+// indicator, which is its own safety problem.
+static const ZoneConfig kFlightZoneConfig = {
+    // The LED-off band is disabled in flight: a very negative first boundary
+    // means ZONE_OFF is unreachable, so the LED keeps blinking red all the way
+    // down. Under canopy the landing ladder takes over anyway.
+    {  kZoneBoundDisabledLow, 800.0f, 1200.0f, 1500.0f, 4500.0f },
+    0.0f, 8.0f,   // hysteresis urgent / relax, m
+    50,   400     // dwell urgent / relax, ms
+};
+
+// Landing ladder — only shown under canopy (see FlightModeTracker).
+//   > 300 m : dark, nothing to do yet
+//   200-300 : 3 blinks/s green
+//   100-200 : 6 blinks/s green
+//    10-100 : bright steady green
+//   <  10 m : dark, assistance finished
+static const ZoneConfig kLandingConfig = {
+    //  dark/steady  steady/fast  fast/slow  slow/dark   (top disabled)
+    {   10.0f,       100.0f,      200.0f,    300.0f,     kZoneBoundDisabledHigh },
+    2.0f, 8.0f,   // hysteresis urgent / relax, m
+    100,  400     // dwell urgent / relax, ms
+};
+
 #if BENCH_MODE
 // The flight thresholds divided by 1000, plus an LED-off band near the desk.
 //
@@ -307,35 +350,5 @@ static const ZoneConfig kZoneConfig = {
     300,   300      // dwell urgent / relax, ms
 };
 #else
-// Flight uses ASYMMETRIC damping. Dropping a zone means danger increasing and
-// commits almost immediately; climbing back is damped hard. Measured on a
-// 50 m/s descent through the 800 m threshold:
-//   symmetric  (5 m / 120 ms both ways) -> LED lights 11.2 m late (225 ms)
-//   asymmetric (0 m / 50 ms urgent)     -> LED lights  ~2-3 m late
-// The urgent dwell is 50 ms rather than 25 ms because 25 ms false-alarms:
-// injecting one 30 m bad read every 50 s while hovering above a threshold
-// produced 24 spurious blink-reds in 20 minutes at 25 ms, and zero at 50 ms.
-// A false blink-red is a safe failure, but false alarms destroy trust in the
-// indicator, which is its own safety problem.
-static const ZoneConfig kZoneConfig = {
-    // The LED-off band is disabled in flight: a very negative first boundary
-    // means ZONE_OFF is unreachable, so the LED keeps blinking red all the way
-    // down. Under canopy the landing ladder takes over anyway.
-    {  kZoneBoundDisabledLow, 800.0f, 1200.0f, 1500.0f, 4500.0f },
-    0.0f, 8.0f,   // hysteresis urgent / relax, m
-    50,   400     // dwell urgent / relax, ms
-};
-
-// Landing ladder — only shown under canopy (see FlightModeTracker).
-//   > 300 m : dark, nothing to do yet
-//   200-300 : 3 blinks/s green
-//   100-200 : 6 blinks/s green
-//    10-100 : bright steady green
-//   <  10 m : dark, assistance finished
-static const ZoneConfig kLandingConfig = {
-    //  dark/steady  steady/fast  fast/slow  slow/dark   (top disabled)
-    {   10.0f,       100.0f,      200.0f,    300.0f,     kZoneBoundDisabledHigh },
-    2.0f, 8.0f,   // hysteresis urgent / relax, m
-    100,  400     // dwell urgent / relax, ms
-};
+static const ZoneConfig kZoneConfig = kFlightZoneConfig;
 #endif

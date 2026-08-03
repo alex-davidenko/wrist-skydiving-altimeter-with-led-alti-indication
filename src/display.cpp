@@ -322,7 +322,8 @@ void renderUi(const Shared &st)
     case UI_MENU2:
       g_gfx->setCursor(20, 12);
       g_gfx->print("MENU");
-      drawButton(kBtnWide, RGB565_BLUE, "UNMOUNT", "CARD");
+      drawButton(kBtnLeft,  RGB565_BLUE,  "UNMOUNT", "CARD");
+      drawButton(kBtnRight, RGB565_GREEN, "DEMO",    "JUMP");
       drawPager(1, 2);
       break;
 
@@ -392,7 +393,8 @@ void renderFrame(const Shared &st)
   // magnified: scaling the built-in 5x7 by ~17 turned every source pixel into a
   // 17x17 block, which is what made the digits look choppy. Big fits 3 glyphs
   // across, Med fits 4 — see tools/make_font.py.
-  const int16_t band = g_h - ALT_BOTTOM_BAND;
+  const int16_t bandY = ALT_TOP_BAND;
+  const int16_t bandH = g_h - ALT_TOP_BAND;
   const GFXfont *font = (len <= 3) ? &FontAltBig : &FontAltMed;
 
   if (alt != g_lastAlt || font != g_lastFont)
@@ -400,7 +402,8 @@ void renderFrame(const Shared &st)
     // Opaque text only covers its own cells, so a change of font or digit count
     // — which moves every glyph — can strand old ink. Clear the band then.
     // Same-length updates redraw in place and stay flicker-free.
-    if (font != g_lastFont || len != g_lastLen) g_gfx->fillRect(0, 0, g_w, band, bg);
+    if (font != g_lastFont || len != g_lastLen)
+      g_gfx->fillRect(0, bandY, g_w, bandH, bg);
 
     g_gfx->setFont(font);
     g_gfx->setTextSize(1, 1, 0);
@@ -411,7 +414,8 @@ void renderFrame(const Shared &st)
     int16_t bx, by;
     uint16_t bw, bh;
     g_gfx->getTextBounds(buf, 0, 0, &bx, &by, &bw, &bh);
-    g_gfx->setCursor((g_w - (int16_t)bw) / 2 - bx, (band - (int16_t)bh) / 2 - by);
+    g_gfx->setCursor((g_w - (int16_t)bw) / 2 - bx,
+                     bandY + (bandH - (int16_t)bh) / 2 - by);
     g_gfx->print(buf);
     g_gfx->setFont(NULL);          // built-in font for everything else
 
@@ -428,7 +432,7 @@ void renderFrame(const Shared &st)
     snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
     g_gfx->setTextColor(ink, bg);
     g_gfx->setTextSize(2, 2, 0);
-    g_gfx->setCursor(8, g_h - 20);
+    g_gfx->setCursor(8, 5);
     g_gfx->print(vbuf);
     g_lastVs = vs;
   }
@@ -535,7 +539,8 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnRight, x, y)) return ACT_POWER;
       return ACT_CANCEL;                       // anywhere else backs out
     case UI_MENU2:
-      if (inside(kBtnWide, x, y))  return ACT_UNMOUNT;
+      if (inside(kBtnLeft, x, y))  return ACT_UNMOUNT;
+      if (inside(kBtnRight, x, y)) return ACT_DEMO;
       return ACT_CANCEL;
     case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:

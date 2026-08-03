@@ -48,6 +48,7 @@ enum UiAction : uint8_t
   ACT_NONE = 0,
   ACT_ZERO,
   ACT_UNMOUNT,
+  ACT_DEMO,
   ACT_POWER,
   ACT_CANCEL,
   ACT_CONFIRM

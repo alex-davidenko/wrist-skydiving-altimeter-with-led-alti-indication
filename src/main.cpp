@@ -21,6 +21,7 @@
 #include "altitude_filter.h"
 #include "baro_math.h"
 #include "config.h"
+#include "demo.h"
 #include "display.h"
 #include "flight_mode.h"
 #include "led.h"
@@ -349,6 +350,7 @@ static void handleGesture(const touch::Event &e)
   switch (display::hitTest(e.x, e.y))
   {
     case display::ACT_ZERO:    display::setScreen(display::UI_CONFIRM_ZERO);    break;
+    case display::ACT_DEMO:    closeMenu(); demo::start();                       break;
     case display::ACT_UNMOUNT: display::setScreen(display::UI_CONFIRM_UNMOUNT); break;
     case display::ACT_POWER:   display::setScreen(display::UI_CONFIRM_POWER);   break;
     case display::ACT_CONFIRM:
@@ -386,8 +388,9 @@ static void pollButton(uint32_t nowMs)
     }
     else if (held >= 30)          // debounce
     {
-      if (display::screen() == display::UI_ALT) openMenu();
-      else                                      closeMenu();
+      if (demo::active())                            demo::stop();
+      else if (display::screen() == display::UI_ALT) openMenu();
+      else                                           closeMenu();
     }
   }
   wasDown = down;
@@ -695,7 +698,8 @@ void loop()
                                                      : "SWIPE>",
                       rx, ry, e.x, e.y);
       }
-      if (display::screen() != display::UI_ALT) handleGesture(e);
+      if (demo::active())                          demo::stop();
+      else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
   }
 
@@ -756,10 +760,15 @@ void loop()
   const LedPattern pattern = currentPattern();
   led::render(pattern, now);
 
+  // While the demo is playing it owns the screen; the sensor keeps sampling and
+  // logging underneath, so nothing about the live pipeline is disturbed.
+  const bool demoRunning = demo::active() && demo::update(now);
+
   // Hand the renderer the same pattern the LED is showing, so both outputs
   // agree by construction. This is a spinlock-protected struct copy — the
   // sample loop never touches SPI.
-  display::publish(pattern, g_filter.altitude(), g_filter.velocity());
+  if (!demoRunning)
+    display::publish(pattern, g_filter.altitude(), g_filter.velocity());
 
   if (g_csvEnabled && static_cast<int32_t>(now - g_nextCsvMs) >= 0)
   {

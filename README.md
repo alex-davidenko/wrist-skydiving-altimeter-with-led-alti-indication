@@ -218,6 +218,32 @@ you need to accelerate past 20 m/s before FREEFALL engages.
 
 Use `p` on the console to eyeball every pattern on the bench without flying.
 
+### Demo jump
+
+**MENU -> swipe left -> DEMO JUMP** replays a whole jump on the screen in about
+45 seconds: 4200 m exit, pilot chute at 1100 m, settled by 800 m, five
+5-second spirals at 15 m/s, then the landing ladder from 300 m down.
+
+It is driven through the *real* ZoneTracker, landing ladder and
+FlightModeTracker — its own instances, so live state is untouched — and the
+pattern is built exactly the way the flying firmware builds it. So it
+demonstrates the actual logic rather than an animation of it, and a bug in the
+thresholds would show up here. Sampling and logging carry on underneath; any
+touch or BOOT press ends it.
+
+Altitude runs on a compressed clock because the real profile is nearly four
+minutes. Blink rates stay on the real clock, so 3 Hz and 6 Hz look exactly as
+they will in the air.
+
+Two things it shows that are easy to forget:
+
+- **The screen is dark for the first few seconds after exit.** You leave the
+  aircraft at zero vertical speed, so the device is in CANOPY mode until you
+  accelerate past 20 m/s. Verified: green appears about 4 s in.
+- **15 m/s spirals stay under canopy.** They sit between the 15 m/s exit and
+  20 m/s entry thresholds, so the display does not flip back to freefall
+  colours — which is exactly what the hysteresis is there for.
+
 ---
 
 ## 6. How the signal path works
