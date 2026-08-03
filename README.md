@@ -327,6 +327,22 @@ single-sample sigma, 80 samples span 0.9–1.3 m routinely. Any peak-to-peak lim
 tight enough to catch a moving board also rejects every good calibration. (This
 build shipped with exactly that bug; it rejected every zeroing attempt.)
 
+**The panel renders on the other core.** A full-screen fill measured
+**23,696 us** against a 25 ms sample period — close enough that drawing from
+the sample loop cost exactly one dropped sample per zone change, and would have
+cost ~28% of the loop once the screen started blinking at 6 Hz (12 fills/s).
+So the renderer is a FreeRTOS task pinned to core 0 while the Arduino loop runs
+on core 1. The sample loop only calls `display::publish()`, a spinlock-protected
+struct copy, and never touches SPI.
+
+The screen is driven from the same `LedPattern` the LED uses, so both outputs
+agree by construction rather than by a second colour table kept in step by hand.
+
+The altitude glyph size is picked at runtime as the largest that fits the digit
+count — a single-digit bench reading fills the screen, a four-digit flight
+altitude shrinks to fit. There is no zone label: the background colour already
+says which zone you are in, so the text was redundant.
+
 **Sampling** is 40 Hz. The library's `read()` is blocking and does a pressure
 conversion followed by a temperature conversion — ~20 ms total at
 `OSR_ULTRA_HIGH` — so 40 Hz is near the practical ceiling. CSV output is

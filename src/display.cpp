@@ -8,7 +8,8 @@
 namespace display {
 bool begin() { return false; }
 void message(const char *, const char *) {}
-void update(float, float, uint8_t, const char *, bool, uint32_t) {}
+void startTask() {}
+void publish(const LedPattern &, float, float) {}
 uint32_t lastFillUs() { return 0; }
 bool available() { return false; }
 }  // namespace display
@@ -30,10 +31,22 @@ uint32_t         g_fillUs = 0;
 int16_t g_w = 0, g_h = 0;
 
 // Change tracking — the panel is slow, so we only redraw what actually moved.
-uint16_t g_lastBg   = 0xDEAD;
-int32_t  g_lastAlt  = INT32_MIN;
-int32_t  g_lastVs   = INT32_MIN;
-char     g_lastLabel[16] = {0};
+uint16_t g_lastBg    = 0xDEAD;
+int32_t  g_lastAlt   = INT32_MIN;
+int32_t  g_lastVs    = INT32_MIN;
+uint8_t  g_lastAltSz = 0;
+
+// State handed over from the sample loop on the other core. Small enough that
+// a spinlock costs nothing; a mutex would risk blocking the sample loop.
+portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
+struct Shared
+{
+  Rgb      color    = {0, 0, 0};
+  uint16_t periodMs = 0;
+  float    altM     = 0.0f;
+  float    vsMps    = 0.0f;
+};
+Shared g_shared;
 
 // The JD9853 register sequence, straight from Waveshare's own Arduino example.
 // Arduino_GFX has no JD9853 driver in any released version (checked 1.5.9 and
@@ -122,19 +135,13 @@ const uint8_t kJd9853Init[] = {
     END_WRITE,
 };
 
-uint16_t backgroundFor(uint8_t zone, bool fault)
+// The LED module already decides what the device should be showing for every
+// state, including the landing ladder and the fault pattern. Reusing its
+// LedPattern keeps one source of truth instead of a second colour table that
+// could drift out of step.
+uint16_t rgb565(const Rgb &c)
 {
-  if (fault) return RGB565_MAGENTA;
-  switch (zone)
-  {
-    case ZONE_BLINK_RED:
-    case ZONE_RED:    return RGB565_RED;
-    case ZONE_YELLOW: return RGB565_ORANGE;
-    case ZONE_GREEN:  return RGB565_GREEN;
-    case ZONE_ABOVE:  return RGB565_BLUE;
-    case ZONE_OFF:
-    default:          return RGB565_BLACK;
-  }
+  return ((c.r & 0xF8) << 8) | ((c.g & 0xFC) << 3) | (c.b >> 3);
 }
 
 // Pick black or white text from the background's luminance, so yellow and
@@ -211,74 +218,120 @@ void message(const char *line1, const char *line2)
   g_gfx->print(line1 ? line1 : "");
   g_gfx->setCursor(8, 70);
   g_gfx->print(line2 ? line2 : "");
-  g_lastBg = 0xDEAD;          // force a repaint on the next update()
+  g_lastBg = 0xDEAD;          // force a full repaint on the next frame
   g_lastAlt = INT32_MIN;
   g_lastVs = INT32_MIN;
-  g_lastLabel[0] = '\0';
+  g_lastAltSz = 0;
 }
 
-void update(float altitudeM, float vspeedMps, uint8_t zone,
-            const char *label, bool fault, uint32_t nowMs)
-{
-  if (!g_ok) return;
-  (void)nowMs;
+namespace {
 
-  const uint16_t bg  = backgroundFor(zone, fault);
+// Draw one frame from an already-copied snapshot. Runs only on the display
+// task, so it is free to take as long as it likes.
+void renderFrame(const Shared &st, uint32_t nowMs)
+{
+  // Blink by alternating the background to black. The number is redrawn on
+  // top of whichever colour is showing, so it stays readable throughout.
+  bool on = true;
+  if (st.periodMs > 0) on = (nowMs % st.periodMs) < (st.periodMs / 2u);
+
+  const uint16_t bg  = on ? rgb565(st.color) : RGB565_BLACK;
   const uint16_t ink = inkFor(bg);
 
-  // A full fill is the expensive operation on this panel, so it happens only
-  // when the zone colour genuinely changes — not every frame.
-  const bool repaint = (bg != g_lastBg);
-  if (repaint)
+  if (bg != g_lastBg)
   {
     fillAll(bg);
-    g_lastBg  = bg;
-    g_lastAlt = INT32_MIN;    // everything on top must be redrawn
-    g_lastVs  = INT32_MIN;
-    g_lastLabel[0] = '\0';
+    g_lastBg    = bg;
+    g_lastAlt   = INT32_MIN;   // everything on top must be redrawn
+    g_lastVs    = INT32_MIN;
+    g_lastAltSz = 0;
   }
 
-  // Altitude in whole metres, right-aligned in a fixed-width field. Fixed width
-  // plus an opaque text background means the previous value is overwritten
-  // in place, with no erase step and therefore no flicker.
-  const int32_t alt = (int32_t)lrintf(altitudeM);
-  if (alt != g_lastAlt)
+  // Altitude in whole metres, as large as will fit. The label that used to sit
+  // at the top is gone — the background colour already says which zone we are
+  // in, so the text was redundant and the digits get the whole screen.
+  const int32_t alt = (int32_t)lrintf(st.altM);
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%ld", (long)alt);
+  const uint8_t len = strlen(buf);
+
+  // Widest size that fits both the width (for this many digits) and the height
+  // of the band above the vertical-speed line.
+  const int16_t band = g_h - ALT_BOTTOM_BAND;
+  uint8_t sz = (g_w - 12) / (len * 6);
+  const uint8_t szByHeight = band / 8;
+  if (sz > szByHeight) sz = szByHeight;
+  if (sz > ALT_TEXT_SIZE_MAX) sz = ALT_TEXT_SIZE_MAX;
+  if (sz < 1) sz = 1;
+
+  if (alt != g_lastAlt || sz != g_lastAltSz)
   {
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%5ld", (long)alt);
+    // A shorter number, or a smaller size, would leave the old glyphs behind.
+    // Opaque text only covers its own cells, so clear the band on any change
+    // of geometry. Digit-count changes are rare, so this is cheap in practice.
+    if (sz != g_lastAltSz) g_gfx->fillRect(0, 0, g_w, band, bg);
+
+    const int16_t tw = len * 6 * sz;
+    const int16_t th = 8 * sz;
     g_gfx->setTextColor(ink, bg);
-    g_gfx->setTextSize(ALT_TEXT_SIZE, ALT_TEXT_SIZE, 0);
-    const int16_t tw = 5 * 6 * ALT_TEXT_SIZE;
-    const int16_t th = 8 * ALT_TEXT_SIZE;
-    g_gfx->setCursor((g_w - tw) / 2, (g_h - th) / 2);
+    g_gfx->setTextSize(sz, sz, 0);
+    g_gfx->setCursor((g_w - tw) / 2, (band - th) / 2);
     g_gfx->print(buf);
-    g_lastAlt = alt;
+
+    g_lastAlt   = alt;
+    g_lastAltSz = sz;
   }
 
-  if (label && strncmp(label, g_lastLabel, sizeof(g_lastLabel) - 1) != 0)
-  {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%-11s", label);
-    g_gfx->setTextColor(ink, bg);
-    g_gfx->setTextSize(2, 2, 0);
-    g_gfx->setCursor(8, 8);
-    g_gfx->print(buf);
-    strncpy(g_lastLabel, label, sizeof(g_lastLabel) - 1);
-    g_lastLabel[sizeof(g_lastLabel) - 1] = '\0';
-  }
-
-  // Vertical speed, quantised to 0.1 m/s so it is not redrawn every sample.
-  const int32_t vs = (int32_t)lrintf(vspeedMps * 10.0f);
+  // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
+  const int32_t vs = (int32_t)lrintf(st.vsMps * 10.0f);
   if (vs != g_lastVs)
   {
-    char buf[20];
-    snprintf(buf, sizeof(buf), "%+6.1f m/s", vs / 10.0f);
+    char vbuf[20];
+    snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
     g_gfx->setTextColor(ink, bg);
     g_gfx->setTextSize(2, 2, 0);
-    g_gfx->setCursor(8, g_h - 24);
-    g_gfx->print(buf);
+    g_gfx->setCursor(8, g_h - 20);
+    g_gfx->print(vbuf);
     g_lastVs = vs;
   }
+}
+
+void displayTask(void *)
+{
+  for (;;)
+  {
+    Shared st;
+    portENTER_CRITICAL(&g_mux);
+    st = g_shared;
+    portEXIT_CRITICAL(&g_mux);
+
+    renderFrame(st, millis());
+    vTaskDelay(pdMS_TO_TICKS(DISPLAY_PERIOD_MS));
+  }
+}
+
+}  // namespace
+
+void publish(const LedPattern &p, float altitudeM, float vspeedMps)
+{
+  portENTER_CRITICAL(&g_mux);
+  g_shared.color    = p.color;
+  g_shared.periodMs = p.periodMs;
+  g_shared.altM     = altitudeM;
+  g_shared.vsMps    = vspeedMps;
+  portEXIT_CRITICAL(&g_mux);
+}
+
+void startTask()
+{
+  if (!g_ok) return;
+  // Pinned to the core the Arduino loop does NOT run on, so a 23.7 ms
+  // full-screen fill cannot stall the 25 ms sample loop.
+  xTaskCreatePinnedToCore(displayTask, "display", DISPLAY_TASK_STACK,
+                          nullptr, DISPLAY_TASK_PRIO, nullptr,
+                          DISPLAY_TASK_CORE);
+  Serial.printf("display: render task on core %d (loop on core %d)\n",
+                DISPLAY_TASK_CORE, xPortGetCoreID());
 }
 
 }  // namespace display

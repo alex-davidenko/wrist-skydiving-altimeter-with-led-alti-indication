@@ -68,8 +68,18 @@
 // 0/2 = portrait 172x320, 1/3 = landscape 320x172. Landscape gives the
 // altitude number far more room, so it is the default.
 #define DISPLAY_ROTATION  1
-#define ALT_TEXT_SIZE     8    // 5x7 base font scaled: 48 px per digit
-#define DISPLAY_PERIOD_MS 100  // 10 Hz; the panel cannot usefully go faster
+// The altitude glyph size is chosen at runtime as the largest that fits the
+// digit count, capped here. Base font is 5x7, so size N is 6N px per digit
+// advance and 8N px tall.
+#define ALT_TEXT_SIZE_MAX  17
+#define ALT_BOTTOM_BAND    26   // px reserved at the bottom for vertical speed
+#define DISPLAY_PERIOD_MS  50   // 20 Hz render; free now that it has its own core
+
+// The renderer runs pinned to the core the Arduino loop does not use, because
+// a full-screen fill measured 23.7 ms against a 25 ms sample period.
+#define DISPLAY_TASK_CORE  0
+#define DISPLAY_TASK_STACK 6144
+#define DISPLAY_TASK_PRIO  1
 
 // Optional: drive the GY-63's mode straps from GPIOs instead of wiring them to
 // rails. Costs two pins and buys certainty — the firmware then guarantees I2C

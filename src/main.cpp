@@ -51,7 +51,6 @@ static uint32_t g_lastSampleUs = 0;
 static uint16_t g_failStreak   = 0;
 static uint32_t g_overruns     = 0;
 static bool     g_csvEnabled   = true;
-static uint32_t g_nextDisplayMs = 0;
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -467,7 +466,6 @@ void setup()
     while (true)
     {
       led::render(led::faultPattern(), millis());
-      display::update(0.0f, 0.0f, ZONE_OFF, "FAULT", true, millis());
       delay(10);
     }
   }
@@ -503,6 +501,8 @@ void setup()
   g_climb.update(g_rawAglM, false);
 #endif
 
+  display::startTask();
+
   printHelp();
 #if BENCH_MODE
   Serial.println(F("\nt_ms,p_hpa,temp_c,raw_m,filt_m,vs_mps,sigma_m,zone"));
@@ -513,7 +513,6 @@ void setup()
   g_lastSampleUs = micros();
   g_nextSampleMs = millis();
   g_nextCsvMs    = millis();
-  g_nextDisplayMs = millis();
 }
 
 // Which pattern should the LED be showing right now?
@@ -590,19 +589,13 @@ void loop()
     }
   }
 
-  led::render(currentPattern(), now);
+  const LedPattern pattern = currentPattern();
+  led::render(pattern, now);
 
-  if (display::available() && static_cast<int32_t>(now - g_nextDisplayMs) >= 0)
-  {
-    g_nextDisplayMs = now + DISPLAY_PERIOD_MS;
-#if BENCH_MODE
-    const char *label = zoneName(g_zones.zone());
-#else
-    const char *label = flightModeName(g_modes.mode());
-#endif
-    display::update(g_filter.altitude(), g_filter.velocity(), g_zones.zone(),
-                    label, g_failStreak >= SENSOR_FAIL_LIMIT, now);
-  }
+  // Hand the renderer the same pattern the LED is showing, so both outputs
+  // agree by construction. This is a spinlock-protected struct copy — the
+  // sample loop never touches SPI.
+  display::publish(pattern, g_filter.altitude(), g_filter.velocity());
 
   if (g_csvEnabled && static_cast<int32_t>(now - g_nextCsvMs) >= 0)
   {
