@@ -84,6 +84,25 @@
 #define DISPLAY_TASK_STACK 6144
 #define DISPLAY_TASK_PRIO  1
 
+// ---- AXS5106L capacitive touch -------------------------------------------
+// Shares the I2C bus with the barometer (touch 0x63, MS5611 0x77).
+// Pin numbers confirmed from Waveshare's own Arduino examples.
+#define TOUCH_ENABLED     1
+#define PIN_TOUCH_RST    47
+#define PIN_TOUCH_INT    48
+
+// Display geometry at DISPLAY_ROTATION 1 (landscape).
+#define DISPLAY_W       320
+#define DISPLAY_H       172
+
+// The controller reports in the panel's native 172x320 portrait frame, so the
+// axes need remapping — and which way round depends on how the panel is
+// mounted, which no datasheet states. Run `T` on the console, tap the corners,
+// and set these from what it prints.
+#define TOUCH_SWAP_XY     1
+#define TOUCH_FLIP_X      0
+#define TOUCH_FLIP_Y      1
+
 // ---- microSD (SDMMC, 4-bit) ----------------------------------------------
 // Cards must be FAT32 with an MBR partition scheme. ESP-IDF returns
 // FR_NO_FILESYSTEM on exFAT or GPT, which is what macOS defaults to for cards

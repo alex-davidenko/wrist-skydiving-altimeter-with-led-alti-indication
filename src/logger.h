@@ -38,6 +38,10 @@ void push(uint32_t tMs, float pressureHpa, float tempC,
           float rawAglM, float filtAglM, float vsMps,
           uint8_t zone, uint8_t phase);
 
+// Flush, close the file and unmount the card. After this the card is safe to
+// remove. Logging stays off until the next boot.
+void close();
+
 void setEnabled(bool on);
 bool enabled();
 bool available();

@@ -9,6 +9,7 @@ namespace logger {
 bool begin(float, float) { return false; }
 void startTask() {}
 void push(uint32_t, float, float, float, float, float, uint8_t, uint8_t) {}
+void close() {}
 void setEnabled(bool) {}
 bool enabled() { return false; }
 bool available() { return false; }
@@ -145,6 +146,25 @@ void writerTask(void *)
 
 bool available() { return g_ok; }
 bool enabled()   { return g_ok && g_enabled; }
+
+void close()
+{
+  if (!g_ok) return;
+  g_enabled = false;
+  // Let the writer task drain whatever is still queued before we close.
+  const uint32_t deadline = millis() + 500;
+  while (g_head.load(std::memory_order_acquire) != g_tail.load(std::memory_order_acquire) &&
+         static_cast<int32_t>(millis() - deadline) < 0)
+  {
+    delay(10);
+  }
+  g_file.flush();
+  g_file.close();
+  SD_MMC.end();
+  g_ok = false;
+  Serial.printf("logger: %s closed, %lu rows. Card is safe to remove.\n",
+                g_name, (unsigned long)rowsWritten());
+}
 void setEnabled(bool on) { g_enabled = on; }
 const char *filename() { return g_name; }
 uint32_t rowsWritten() { return g_rows.load(std::memory_order_relaxed); }

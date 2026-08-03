@@ -23,6 +23,7 @@
 #include "flight_mode.h"
 #include "led.h"
 #include "logger.h"
+#include "touch.h"
 #include "zones.h"
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,7 @@ static uint32_t g_lastSampleUs = 0;
 static uint16_t g_failStreak   = 0;
 static uint32_t g_overruns     = 0;
 static bool     g_csvEnabled   = true;
+static bool     g_touchDump    = false;
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -307,6 +309,7 @@ static void printHelp()
     "  c            toggle serial CSV streaming\n"
     "  l            toggle SD logging\n"
     "  s            status\n"
+    "  T            touch coordinate dump (for calibrating the mapping)\n"
     "  ?            this help"));
 }
 
@@ -360,6 +363,14 @@ static void handleCommand(char *line)
       resyncSampleClock();
       break;
     case 's': printStatus(); break;
+    case 'T':
+      g_touchDump = !g_touchDump;
+      Serial.printf("\nTouch dump %s — tap the corners; set TOUCH_SWAP_XY / "
+                    "TOUCH_FLIP_X / TOUCH_FLIP_Y in config.h so the mapped\n"
+                    "coordinates match where you actually tapped "
+                    "(0,0 = top-left, %d,%d = bottom-right).\n",
+                    g_touchDump ? "on" : "off", DISPLAY_W - 1, DISPLAY_H - 1);
+      break;
     case 'l':
       logger::setEnabled(!logger::enabled());
       Serial.printf("\nSD logging %s\n", logger::enabled() ? "on" : "off");
@@ -520,6 +531,8 @@ void setup()
   logger::begin(g_qnhHpa, g_groundPHpa);
   logger::startTask();
 
+  touch::begin();
+
   printHelp();
 #if BENCH_MODE
   Serial.println(F("\nt_ms,p_hpa,temp_c,raw_m,filt_m,vs_mps,sigma_m,zone"));
@@ -566,6 +579,17 @@ void loop()
 
   pollSerial();
   pollButton(now);
+
+  if (touch::available())
+  {
+    const touch::Point t = touch::takeTouch();
+    if (t.valid && g_touchDump)
+    {
+      int16_t rx, ry;
+      touch::rawLast(&rx, &ry);
+      Serial.printf("touch raw=(%4d,%4d) -> mapped=(%4d,%4d)\n", rx, ry, t.x, t.y);
+    }
+  }
 
   if (static_cast<int32_t>(now - g_nextSampleMs) >= 0)
   {
