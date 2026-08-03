@@ -34,9 +34,13 @@ void IRAM_ATTR onTouchInt() { g_intFlag = true; }
 
 bool readReg(uint8_t reg, uint8_t *buf, uint8_t len)
 {
+  // NOTE the STOP: endTransmission() with no argument, not endTransmission(false).
+  // A repeated start does not work with this controller — Waveshare's driver
+  // sends a full stop between the register write and the read, and copying that
+  // exactly is what made it respond.
   Wire.beginTransmission(kAddr);
   Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.endTransmission() != 0) return false;
   if (Wire.requestFrom((int)kAddr, (int)len) != len) return false;
   for (uint8_t i = 0; i < len; i++) buf[i] = Wire.read();
   return true;
@@ -77,18 +81,25 @@ bool begin()
   digitalWrite(PIN_TOUCH_RST, HIGH);
   delay(300);
 
-  uint8_t id[3] = {0};
-  if (!readReg(kRegId, id, 3) || (id[0] == 0 && id[1] == 0 && id[2] == 0))
+  // Presence is an address ACK, nothing more. Do NOT validate the ID register:
+  // Waveshare's own driver reads it and only prints it when non-zero, never
+  // treating zeros as failure — this chip appears to return zeros there, and
+  // checking it rejected a perfectly working controller.
+  Wire.beginTransmission(kAddr);
+  if (Wire.endTransmission() != 0)
   {
-    Serial.println(F("touch: AXS5106L not responding at 0x63"));
+    Serial.println(F("touch: no ACK at 0x63"));
     return false;
   }
+
+  uint8_t id[3] = {0};
+  readReg(kRegId, id, 3);   // informational only
 
   pinMode(PIN_TOUCH_INT, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_TOUCH_INT), onTouchInt, FALLING);
 
   g_ok = true;
-  Serial.printf("touch: AXS5106L id %02X %02X %02X\n", id[0], id[1], id[2]);
+  Serial.printf("touch: AXS5106L ready (id %02X %02X %02X)\n", id[0], id[1], id[2]);
   return true;
 }
 
