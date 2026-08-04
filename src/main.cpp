@@ -28,6 +28,7 @@
 #include "led.h"
 #include "logger.h"
 #include "touch.h"
+#include "usb_msc.h"
 #include "zones.h"
 
 // ---------------------------------------------------------------------------
@@ -338,15 +339,15 @@ static void handleGesture(const touch::Event &e)
   const uint8_t scr = display::screen();
 
   // Swipes page between the menu screens; they mean nothing on a confirm.
-  if (e.type == touch::EV_SWIPE_LEFT && scr == display::UI_MENU)
+  if (e.type == touch::EV_SWIPE_LEFT)
   {
-    display::setScreen(display::UI_MENU2);
-    return;
+    if (scr == display::UI_MENU)  { display::setScreen(display::UI_MENU2); return; }
+    if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU3); return; }
   }
-  if (e.type == touch::EV_SWIPE_RIGHT && scr == display::UI_MENU2)
+  if (e.type == touch::EV_SWIPE_RIGHT)
   {
-    display::setScreen(display::UI_MENU);
-    return;
+    if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU2); return; }
+    if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU);  return; }
   }
   if (e.type != touch::EV_TAP) return;
 
@@ -354,11 +355,21 @@ static void handleGesture(const touch::Event &e)
   {
     case display::ACT_ZERO:    display::setScreen(display::UI_CONFIRM_ZERO);    break;
     case display::ACT_DEMO:    closeMenu(); demo::start();                       break;
+    case display::ACT_USB:     display::setScreen(display::UI_CONFIRM_USB);      break;
     case display::ACT_UNMOUNT: display::setScreen(display::UI_CONFIRM_UNMOUNT); break;
     case display::ACT_POWER:   display::setScreen(display::UI_CONFIRM_POWER);   break;
     case display::ACT_CONFIRM:
       if      (scr == display::UI_CONFIRM_POWER) powerOff();
       else if (scr == display::UI_CONFIRM_ZERO)  zeroFromMenu();
+      else if (scr == display::UI_CONFIRM_USB)
+      {
+        // Close the log first: the host is about to own this filesystem, and
+        // two writers on one FAT corrupt it.
+        logger::close();
+        display::setBanner("REBOOTING", "to USB drive");
+        delay(800);
+        usbmsc::rebootIntoMode();          // does not return
+      }
       else                                       unmountCard();
       break;
     case display::ACT_CANCEL:  closeMenu(); break;
@@ -548,6 +559,11 @@ static void pollSerial()
 // ---------------------------------------------------------------------------
 void setup()
 {
+  // Before anything else: did the last boot ask for USB drive mode? The check
+  // consumes the request, so a crash in that mode cannot trap the device — any
+  // reset comes back here and continues normally.
+  if (usbmsc::bootRequested()) usbmsc::runForever();   // never returns
+
   Serial.begin(115200);
   delay(300);
 

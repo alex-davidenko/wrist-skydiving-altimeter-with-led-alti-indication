@@ -36,9 +36,11 @@ enum UiScreen : uint8_t
 {
   UI_ALT = 0,          // normal altitude display
   UI_MENU,             // page 1: ZERO / POWER OFF
-  UI_MENU2,            // page 2: UNMOUNT CARD
+  UI_MENU2,            // page 2: UNMOUNT CARD / DEMO JUMP
+  UI_MENU3,            // page 3: USB DRIVE
   UI_CONFIRM_ZERO,
   UI_CONFIRM_UNMOUNT,
+  UI_CONFIRM_USB,
   UI_CONFIRM_POWER,
   UI_BANNER            // plain two-line message
 };
@@ -49,6 +51,7 @@ enum UiAction : uint8_t
   ACT_ZERO,
   ACT_UNMOUNT,
   ACT_DEMO,
+  ACT_USB,
   ACT_POWER,
   ACT_CANCEL,
   ACT_CONFIRM

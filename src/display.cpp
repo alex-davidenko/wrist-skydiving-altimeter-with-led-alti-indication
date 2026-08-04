@@ -330,7 +330,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_GREEN,  "ZERO",  "HERE");
       drawButton(kBtnRight, RGB565_ORANGE, "POWER", "OFF");
-      drawPager(0, 2);
+      drawPager(0, 3);
       break;
 
     case UI_MENU2:
@@ -338,15 +338,24 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_BLUE,  "UNMOUNT", "CARD");
       drawButton(kBtnRight, RGB565_GREEN, "DEMO",    "JUMP");
-      drawPager(1, 2);
+      drawPager(1, 3);
+      break;
+
+    case UI_MENU3:
+      g_gfx->setCursor(20, 12);
+      g_gfx->print("MENU");
+      drawButton(kBtnWide, RGB565_BLUE, "USB", "DRIVE");
+      drawPager(2, 3);
       break;
 
     case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:
+    case UI_CONFIRM_USB:
     case UI_CONFIRM_POWER:
       g_gfx->setCursor(20, 12);
       g_gfx->print(st.screen == UI_CONFIRM_UNMOUNT ? "UNMOUNT CARD?"
                  : st.screen == UI_CONFIRM_POWER   ? "POWER OFF?"
+                 : st.screen == UI_CONFIRM_USB     ? "REBOOT TO USB?"
                                                    : "SET ZERO HERE?");
       drawButton(kBtnLeft,  RGB565_BLACK, "CANCEL", "");
       drawButton(kBtnRight, RGB565_RED,   "YES",    "");
@@ -619,8 +628,12 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnLeft, x, y))  return ACT_UNMOUNT;
       if (inside(kBtnRight, x, y)) return ACT_DEMO;
       return ACT_CANCEL;
+    case UI_MENU3:
+      if (inside(kBtnWide, x, y))  return ACT_USB;
+      return ACT_CANCEL;
     case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:
+    case UI_CONFIRM_USB:
     case UI_CONFIRM_POWER:
       if (inside(kBtnRight, x, y)) return ACT_CONFIRM;
       return ACT_CANCEL;                       // default to the safe choice

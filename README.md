@@ -227,6 +227,29 @@ you need to accelerate past 20 m/s before FREEFALL engages.
 
 Use `p` on the console to eyeball every pattern on the bench without flying.
 
+### Reading logs over USB-C
+
+**MENU -> swipe twice -> USB DRIVE** reboots the device as a plain USB mass
+storage device, so the card can be read without pulling it.
+
+This is a boot mode rather than a runtime toggle, deliberately. The firmware and
+the host cannot both own a FAT filesystem — two writers corrupt it — so entry
+closes the log, sets a flag and restarts. The next boot consumes the flag and
+comes up as a drive with the altimeter not running at all.
+
+The flag lives in `RTC_NOINIT` memory, which survives a software reset but not a
+power cycle, and is cleared *before* anything that could fail. That gives the
+recovery property for free: **any press of RST returns to normal operation**,
+and no crash in USB mode can trap the device there. Normal boot is always the
+serial console; reading logs is the thing that takes deliberate effort.
+
+In this mode the card is driven at the block level through the ESP-IDF sdmmc
+API rather than SD_MMC. MSC is a block protocol — the host supplies the
+filesystem — so mounting FAT on the device would be pointless and would risk
+two owners again.
+
+Eject on the host, then press RST.
+
 ### Demo jump
 
 **MENU -> swipe left -> DEMO JUMP** replays a whole jump on the screen in real
