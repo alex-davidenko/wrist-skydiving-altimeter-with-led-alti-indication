@@ -134,11 +134,18 @@
 #define LOG_TASK_STACK    4096
 #define LOG_TASK_PRIO     1
 
-// Optional: drive the GY-63's mode straps from GPIOs instead of wiring them to
-// rails. Costs two pins and buys certainty — the firmware then guarantees I2C
-// mode and a known address regardless of what the breakout's own pull-ups do.
-// Set either to -1 to leave that pin unconnected and strap it in hardware.
-#define PIN_SENSOR_PS     9    // held HIGH  -> I2C (LOW would select SPI)
+// The GY-63's mode straps. Set a pin to -1 when that strap is wired to a rail
+// in hardware instead; the firmware then leaves the pin alone entirely.
+//
+// PS is hard-wired to 3V3. It selects I2C vs SPI and never changes at runtime,
+// so driving it from a GPIO bought nothing but a window during MCU boot where
+// the pin was an undriven input. A rail is definitive from the instant power is
+// applied, and it is one fewer joint to fatigue under opening shock.
+//
+// CSB is still driven, LOW for address 0x77. Wire it to GND and set this to -1
+// as well if you want the sensor down to four wires — but only if you actually
+// wire it: floating CSB leaves the address undefined.
+#define PIN_SENSOR_PS    -1    // wired to 3V3 = I2C mode
 #define PIN_SENSOR_CSB   11    // LOW -> address 0x77, HIGH -> 0x76
 #define SENSOR_CSB_LEVEL  0    // 0 = LOW = 0x77
 

@@ -26,14 +26,15 @@ Target board: **Waveshare ESP32-S3-Touch-LCD-1.47**.
 | GND   | GND      | |
 | SCL   | **GPIO41** | the board's I2C bus, shared with the touch panel |
 | SDA   | **GPIO42** | |
-| PS    | **GPIO9**  | driven HIGH by firmware = I2C |
+| PS    | **3V3**    | static strap: HIGH = I2C |
 | CSB   | **GPIO11** | driven LOW by firmware = address 0x77 |
 | SDO   | *leave unconnected* | SPI-only pin, unused in I2C mode |
 
-PS and CSB are driven from GPIOs rather than strapped to rails, so the firmware
-guarantees I2C mode at a known address regardless of what the breakout's own
-pull-ups do. Set `PIN_SENSOR_PS` / `PIN_SENSOR_CSB` to `-1` in `config.h` if you
-would rather strap them in hardware.
+PS goes to a rail rather than a GPIO: it selects I2C vs SPI and never changes at
+runtime, so a GPIO bought nothing but a window during MCU boot where the pin was
+an undriven input. CSB is still driven from GPIO11 (LOW = 0x77); wire it to GND
+and set `PIN_SENSOR_CSB` to `-1` if you want the sensor down to four wires — but
+only if you actually wire it, since floating CSB leaves the address undefined.
 
 **Pull-ups:** the touch panel already pulls this bus up and the GY-63 adds its
 own 4.7 kΩ pair. In parallel that is ~2.4 kΩ, sinking ~1.4 mA at 3.3 V — inside
