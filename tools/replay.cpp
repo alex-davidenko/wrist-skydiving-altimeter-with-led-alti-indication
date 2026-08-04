@@ -34,6 +34,7 @@ struct Row
   uint32_t tMs;
   float    pHpa, tempC, rawM, filtM, vsMps;
   int      zone, phase;
+  float    groundP;      // 0 if the log predates this column
 };
 
 struct Header
@@ -102,9 +103,14 @@ int main(int argc, char **argv)
     if (!isdigit((unsigned char)line[0])) continue;   // column header
 
     Row r{};
-    if (sscanf(line, "%u,%f,%f,%f,%f,%f,%d,%d", &r.tMs, &r.pHpa, &r.tempC,
-               &r.rawM, &r.filtM, &r.vsMps, &r.zone, &r.phase) == 8)
+    const int n = sscanf(line, "%u,%f,%f,%f,%f,%f,%d,%d,%f", &r.tMs, &r.pHpa,
+                         &r.tempC, &r.rawM, &r.filtM, &r.vsMps, &r.zone,
+                         &r.phase, &r.groundP);
+    if (n >= 8)
+    {
+      if (n < 9) r.groundP = h.groundP;   // older log: header value is all we have
       rows.push_back(r);
+    }
   }
   fclose(f);
 
@@ -125,10 +131,12 @@ int main(int argc, char **argv)
   ZoneTracker zones;
   zones.begin(zc);
 
-  const float groundAlt = baro::pressureAltitude(h.groundP, h.qnh);
+  float lastGround = 0.0f;
   bool primed = false;
   double worstRaw = 0, worstFilt = 0;
   size_t zoneMismatch = 0;
+  std::vector<double> filtErr;
+  filtErr.reserve(rows.size());
 
   // ---- stats ------------------------------------------------------------
   float apogee = -1e9f, maxDescent = 0.0f;
@@ -139,10 +147,25 @@ int main(int argc, char **argv)
   {
     const Row &r = rows[i];
 
+    // Re-zeroing changes the reference and resets the device's filter. The
+    // per-row ground_p is how a replay sees that happen; without it the
+    // recomputed altitude drifts from the device's by the size of the
+    // correction, for the rest of the file.
+    // Threshold, not exact inequality: floats that merely round differently
+    // must not look like a re-zero. A real one moves the reference far more
+    // than this — 0.005 hPa is about 4 cm of altitude.
+    if (std::fabs(r.groundP - lastGround) > 0.005f)
+    {
+      lastGround = r.groundP;
+      // Reset to exactly zero, which is what zeroHere() does on the device —
+      // not to the first post-zero sample, which is merely near zero.
+      if (primed) { filt.reset(0.0f); zones.reset(0.0f); }
+    }
+
     // Does the barometric maths reproduce what the device logged?
-    const float rawRecomputed =
-        h.groundP > 0.0f ? baro::pressureAltitude(r.pHpa, h.qnh) - groundAlt
-                         : baro::pressureAltitude(r.pHpa, h.qnh);
+    const float groundAlt =
+        r.groundP > 0.0f ? baro::pressureAltitude(r.groundP, h.qnh) : 0.0f;
+    const float rawRecomputed = baro::pressureAltitude(r.pHpa, h.qnh) - groundAlt;
     worstRaw = std::max<double>(worstRaw, std::fabs(rawRecomputed - r.rawM));
 
     if (!primed) { filt.reset(r.rawM); zones.reset(r.rawM); primed = true; }
@@ -151,7 +174,9 @@ int main(int argc, char **argv)
     filt.update(r.rawM, dt);
     const uint8_t z = zones.update(filt.altitude(), r.tMs);
 
-    worstFilt = std::max<double>(worstFilt, std::fabs(filt.altitude() - r.filtM));
+    const double fe = std::fabs(filt.altitude() - r.filtM);
+    worstFilt = std::max(worstFilt, fe);
+    filtErr.push_back(fe);
     if (z != r.zone) zoneMismatch++;
 
     if (r.filtM > apogee) apogee = r.filtM;
@@ -164,11 +189,21 @@ int main(int argc, char **argv)
   }
 
   // ---- verification ------------------------------------------------------
+  // Judge on a high percentile, not the peak. Zeroing blocks the device for
+  // ~1.6 s and logs nothing, so a replay meets a large dt there and diverges
+  // briefly. That is a known discontinuity, not evidence the tooling is wrong —
+  // failing a whole jump on it would make the check useless.
+  std::sort(filtErr.begin(), filtErr.end());
+  const double p999 = filtErr.empty() ? 0.0
+                    : filtErr[(size_t)(filtErr.size() * 0.999)];
+
   printf("VERIFICATION (replay vs what the device logged)\n");
   printf("  baro maths  : max %.4f m\n", worstRaw);
-  printf("  filter      : max %.4f m\n", worstFilt);
+  printf("  filter      : %.4f m at the 99.9th percentile (peak %.4f m)\n",
+         p999, worstFilt);
   printf("  zone        : %zu / %zu samples differ\n", zoneMismatch, rows.size());
-  const bool trust = worstFilt < 0.05 && zoneMismatch * 200 < rows.size();
+  const bool trust = p999 < 0.05 && worstRaw < 0.10 &&
+                     zoneMismatch * 200 < rows.size();
   printf("  -> %s\n\n", trust
              ? "match. Replay is faithful; tuning experiments are meaningful."
              : "MISMATCH. Check the firmware build matches this log's header "

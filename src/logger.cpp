@@ -8,7 +8,7 @@
 namespace logger {
 bool begin(float, float) { return false; }
 void startTask() {}
-void push(uint32_t, float, float, float, float, float, uint8_t, uint8_t) {}
+void push(uint32_t, float, float, float, float, float, uint8_t, uint8_t, float) {}
 void close() {}
 void setEnabled(bool) {}
 bool enabled() { return false; }
@@ -25,6 +25,7 @@ uint64_t cardSizeMb() { return 0; }
 #include <SD_MMC.h>
 
 #include <atomic>
+#include <time.h>
 
 namespace logger {
 
@@ -42,6 +43,12 @@ struct Rec
   float    vsMps;
   uint8_t  zone;
   uint8_t  phase;
+  // Carried per row, not just in the header: re-zeroing mid-log changes the
+  // reference, and a replay that assumed the header value diverged from the
+  // device by half a metre from that point on. Now every row is self-describing
+  // and a change of this value is also how a replay knows to reset its filter,
+  // which is what the device does when you zero.
+  float    groundP;
 };
 
 Rec     *g_ring    = nullptr;
@@ -83,8 +90,16 @@ void writeHeader()
   // Recorded so a replay can go all the way from pressure to AGL without
   // guessing. Captured at file creation: re-zeroing mid-log is not reflected.
   g_file.printf("# qnh=%.2f ground_p=%.3f\n", (double)g_qnh, (double)g_groundP);
+  // Wall clock at file creation. More reliable than the FAT timestamp, which
+  // reads 1980 whenever the device has not been told the time.
+  {
+    const time_t now = time(nullptr);
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    g_file.printf("# started=%s\n", ts);
+  }
   g_file.printf("# build=%s %s\n", __DATE__, __TIME__);
-  g_file.printf("t_ms,p_hpa,temp_c,alt_raw_m,alt_filt_m,vs_mps,zone,phase\n");
+  g_file.printf("t_ms,p_hpa,temp_c,alt_raw_m,alt_filt_m,vs_mps,zone,phase,ground_p\n");
   g_file.flush();
 }
 
@@ -119,10 +134,10 @@ void writerTask(void *)
     {
       const Rec &r = g_ring[tail % g_ringLen];
       const int n = snprintf(line, sizeof(line),
-                             "%lu,%.3f,%.2f,%.3f,%.3f,%.2f,%u,%u\n",
+                             "%lu,%.3f,%.2f,%.3f,%.3f,%.2f,%u,%u,%.3f\n",
                              (unsigned long)r.tMs, (double)r.pHpa, (double)r.tempC,
                              (double)r.rawM, (double)r.filtM, (double)r.vsMps,
-                             r.zone, r.phase);
+                             r.zone, r.phase, (double)r.groundP);
       if (n > 0) g_file.write(reinterpret_cast<const uint8_t *>(line), n);
       g_rows.fetch_add(1, std::memory_order_relaxed);
       tail++;
@@ -226,7 +241,7 @@ void startTask()
 
 void push(uint32_t tMs, float pressureHpa, float tempC,
           float rawAglM, float filtAglM, float vsMps,
-          uint8_t zone, uint8_t phase)
+          uint8_t zone, uint8_t phase, float groundPHpa)
 {
   if (!g_ok || !g_enabled) return;
 
@@ -251,6 +266,7 @@ void push(uint32_t tMs, float pressureHpa, float tempC,
   r.vsMps = vsMps;
   r.zone  = zone;
   r.phase = phase;
+  r.groundP = groundPHpa;
 
   g_head.store(head + 1, std::memory_order_release);
 }

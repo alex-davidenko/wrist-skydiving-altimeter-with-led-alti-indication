@@ -1,10 +1,10 @@
+
+# Full-flash board backups (16 MB binaries)
+# Per-machine Claude Code tool permissions, not project config
+*.pyc
+.claude/settings.local.json
 .pio/
 .venv/
 .vscode/
-*.pyc
-
-# Full-flash board backups (16 MB binaries)
 backup/
-
-# Per-machine Claude Code tool permissions, not project config
-.claude/settings.local.json
+logs/

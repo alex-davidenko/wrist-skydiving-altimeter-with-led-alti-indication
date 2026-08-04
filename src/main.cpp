@@ -16,6 +16,8 @@
 
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include <MS5611.h>
 
@@ -61,6 +63,7 @@ static bool     g_csvEnabled   = true;
 static bool     g_touchDump    = false;
 static float    g_battV        = 0.0f;
 static uint32_t g_nextBattMs   = 0;
+static const char *g_resetReason = "?";
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -426,6 +429,7 @@ static void printHelp()
     "  c            toggle serial CSV streaming\n"
     "  l            toggle SD logging\n"
     "  s            status\n"
+    "  w <unix>     set the clock, so log files are not stamped 1980\n"
     "  T            touch coordinate dump (for calibrating the mapping)\n"
     "  ?            this help"));
 }
@@ -450,6 +454,13 @@ static void printStatus()
   Serial.printf("fail streak   : %u   loop overruns: %u\n", g_failStreak, (unsigned)g_overruns);
   Serial.printf("LED brightness: %u\n", led::brightness());
   Serial.printf("battery       : %.2f V\n", g_battV);
+  Serial.printf("reset reason  : %s\n", g_resetReason);
+  {
+    const time_t now = time(nullptr);
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    Serial.printf("clock         : %s\n", ts);
+  }
   if (display::available())
     Serial.printf("display       : ok, full fill %lu us\n",
                   (unsigned long)display::lastFillUs());
@@ -481,6 +492,18 @@ static void handleCommand(char *line)
       resyncSampleClock();
       break;
     case 's': printStatus(); break;
+    case 'w':
+    {
+      const long epoch = atol(arg);
+      if (epoch > 1700000000L)          // sanity: later than Nov 2023
+      {
+        const struct timeval tv = {(time_t)epoch, 0};
+        settimeofday(&tv, nullptr);
+        Serial.printf("\nClock set. New log files will be stamped correctly.\n");
+      }
+      else Serial.println(F("\nusage: w <unix seconds>  (see the README for a one-liner)"));
+      break;
+    }
     case 'T':
       g_touchDump = !g_touchDump;
       Serial.printf("\nTouch dump %s — tap the corners; set TOUCH_SWAP_XY / "
@@ -581,13 +604,37 @@ void setup()
   // deep sleep reports DEEPSLEEP, a plain power-up or RST does not.
   {
     const esp_reset_reason_t rr = esp_reset_reason();
-    Serial.printf("Reset reason : %s\n",
-                  rr == ESP_RST_DEEPSLEEP ? "DEEPSLEEP (woke from power-off)"
-                : rr == ESP_RST_POWERON   ? "POWERON"
-                : rr == ESP_RST_SW        ? "SOFTWARE"
-                : rr == ESP_RST_PANIC     ? "PANIC (crash!)"
-                : rr == ESP_RST_EXT       ? "EXTERNAL (RST button)"
-                                          : "other");
+    g_resetReason = rr == ESP_RST_DEEPSLEEP ? "DEEPSLEEP (woke from power-off)"
+                  : rr == ESP_RST_POWERON   ? "POWERON"
+                  : rr == ESP_RST_SW        ? "SOFTWARE (reboot)"
+                  : rr == ESP_RST_PANIC     ? "PANIC (crash!)"
+                  : rr == ESP_RST_EXT       ? "EXTERNAL (RST button)"
+                                            : "other";
+    Serial.printf("Reset reason : %s\n", g_resetReason);
+  }
+
+  // The board has no battery-backed clock and no network, so on a cold start
+  // it believes it is 1980 — which is what FAT then stamps on every log file.
+  // Seed from the firmware build time so files at least land in the right week,
+  // and use 't <unix>' to set it exactly. The RTC keeps running through deep
+  // sleep, so a set time survives a power-off/wake cycle.
+  {
+    static const char kMon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    char mon[4] = {__DATE__[0], __DATE__[1], __DATE__[2], 0};
+    struct tm bt = {};
+    bt.tm_mon  = (int)((strstr(kMon, mon) - kMon) / 3);
+    bt.tm_mday = atoi(__DATE__ + 4);
+    bt.tm_year = atoi(__DATE__ + 7) - 1900;
+    bt.tm_hour = atoi(__TIME__);
+    bt.tm_min  = atoi(__TIME__ + 3);
+    bt.tm_sec  = atoi(__TIME__ + 6);
+    const time_t built = mktime(&bt);
+    if (time(nullptr) < built)
+    {
+      const struct timeval tv = {built, 0};
+      settimeofday(&tv, nullptr);
+      Serial.printf("Clock seeded from build time; 't <unix>' to set exactly.\n");
+    }
   }
   Serial.println(F("NOT A SAFETY DEVICE — secondary visual aid only."));
   Serial.printf("Mode: %s\n", BENCH_MODE ? "BENCH (metre-scale thresholds)"
@@ -796,7 +843,7 @@ void loop()
     const uint8_t phase = static_cast<uint8_t>(g_modes.mode());
 #endif
     logger::push(now, g_pressureHpa, g_tempC, g_rawAglM, g_filter.altitude(),
-                 g_filter.velocity(), g_zones.zone(), phase);
+                 g_filter.velocity(), g_zones.zone(), phase, g_groundPHpa);
   }
 
   const LedPattern pattern = currentPattern();

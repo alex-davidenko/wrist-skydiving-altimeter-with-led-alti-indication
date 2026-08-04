@@ -36,7 +36,7 @@ void startTask();
 // Append one sample. Called from the sample loop; never blocks on I/O.
 void push(uint32_t tMs, float pressureHpa, float tempC,
           float rawAglM, float filtAglM, float vsMps,
-          uint8_t zone, uint8_t phase);
+          uint8_t zone, uint8_t phase, float groundPHpa);
 
 // Flush, close the file and unmount the card. After this the card is safe to
 // remove. Logging stays off until the next boot.
