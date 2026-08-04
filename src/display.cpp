@@ -10,6 +10,7 @@ bool begin() { return false; }
 void message(const char *, const char *) {}
 void startTask() {}
 void publish(const LedPattern &, float, float) {}
+void setBattery(float) {}
 void setScreen(uint8_t) {}
 uint8_t screen() { return UI_ALT; }
 void setBanner(const char *, const char *) {}
@@ -41,6 +42,7 @@ int16_t g_w = 0, g_h = 0;
 uint16_t g_lastBg    = 0xDEAD;
 int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
+int32_t  g_lastBatt  = INT32_MIN;
 const AltFont *g_lastAltFont = nullptr;
 char     g_lastStr[10] = {0};
 
@@ -58,6 +60,7 @@ struct Shared
   float    altM     = 0.0f;
   float    vsMps    = 0.0f;
   uint8_t  screen   = UI_ALT;
+  float    battV    = 0.0f;
   char     l1[20]   = {0};
   char     l2[20]   = {0};
 };
@@ -261,6 +264,7 @@ void message(const char *line1, const char *line2)
   g_lastBg = 0xDEAD;          // force a full repaint on the next frame
   g_lastAlt = INT32_MIN;
   g_lastVs = INT32_MIN;
+  g_lastBatt = INT32_MIN;
   g_lastAltFont = nullptr;
   g_lastStr[0] = '\0';
 }
@@ -428,6 +432,7 @@ void renderFrame(const Shared &st)
     g_lastBg    = bg;
     g_lastAlt     = INT32_MIN;   // everything on top must be redrawn
     g_lastVs      = INT32_MIN;
+    g_lastBatt    = INT32_MIN;
     g_lastAltFont = nullptr;
     g_lastStr[0]  = '\0';        // nothing to erase, the fill did it
   }
@@ -485,6 +490,21 @@ void renderFrame(const Shared &st)
     g_gfx->setCursor(8, 5);
     g_gfx->print(vbuf);
     g_lastVs = vs;
+  }
+
+  // Battery, top-right opposite the speed. Quantised to 10 mV so ADC jitter
+  // does not repaint it constantly.
+  const int32_t bv = (int32_t)lrintf(st.battV * 100.0f);
+  if (bv != g_lastBatt)
+  {
+    char bbuf[12];
+    snprintf(bbuf, sizeof(bbuf), "%.2fV", bv / 100.0f);
+    g_gfx->setFont(NULL);
+    g_gfx->setTextColor(ink, bg);
+    g_gfx->setTextSize(2, 2, 0);
+    g_gfx->setCursor(g_w - 8 - (int16_t)strlen(bbuf) * 12, 5);
+    g_gfx->print(bbuf);
+    g_lastBatt = bv;
   }
 }
 
@@ -544,6 +564,13 @@ void displayTask(void *)
 }
 
 }  // namespace
+
+void setBattery(float volts)
+{
+  portENTER_CRITICAL(&g_mux);
+  g_shared.battV = volts;
+  portEXIT_CRITICAL(&g_mux);
+}
 
 void publish(const LedPattern &p, float altitudeM, float vspeedMps)
 {

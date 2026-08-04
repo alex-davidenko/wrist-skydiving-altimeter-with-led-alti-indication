@@ -15,6 +15,7 @@
 #include <Wire.h>
 
 #include <esp_sleep.h>
+#include <esp_system.h>
 
 #include <MS5611.h>
 
@@ -57,6 +58,8 @@ static uint16_t g_failStreak   = 0;
 static uint32_t g_overruns     = 0;
 static bool     g_csvEnabled   = true;
 static bool     g_touchDump    = false;
+static float    g_battV        = 0.0f;
+static uint32_t g_nextBattMs   = 0;
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -435,6 +438,7 @@ static void printStatus()
 #endif
   Serial.printf("fail streak   : %u   loop overruns: %u\n", g_failStreak, (unsigned)g_overruns);
   Serial.printf("LED brightness: %u\n", led::brightness());
+  Serial.printf("battery       : %.2f V\n", g_battV);
   if (display::available())
     Serial.printf("display       : ok, full fill %lu us\n",
                   (unsigned long)display::lastFillUs());
@@ -556,6 +560,19 @@ void setup()
   pinMode(PIN_BUTTON, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
 
   Serial.println(F("\n\n=== Skydiving altimeter — phase 1 ==="));
+  // The power LEDs are hard-wired and stay lit in deep sleep, so they say
+  // nothing about whether sleep worked. The reset reason does: waking from
+  // deep sleep reports DEEPSLEEP, a plain power-up or RST does not.
+  {
+    const esp_reset_reason_t rr = esp_reset_reason();
+    Serial.printf("Reset reason : %s\n",
+                  rr == ESP_RST_DEEPSLEEP ? "DEEPSLEEP (woke from power-off)"
+                : rr == ESP_RST_POWERON   ? "POWERON"
+                : rr == ESP_RST_SW        ? "SOFTWARE"
+                : rr == ESP_RST_PANIC     ? "PANIC (crash!)"
+                : rr == ESP_RST_EXT       ? "EXTERNAL (RST button)"
+                                          : "other");
+  }
   Serial.println(F("NOT A SAFETY DEVICE — secondary visual aid only."));
   Serial.printf("Mode: %s\n", BENCH_MODE ? "BENCH (metre-scale thresholds)"
                                          : "FLIGHT (real thresholds)");
@@ -701,6 +718,15 @@ void loop()
       if (demo::active())                          demo::stop();
       else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
+  }
+
+  if (static_cast<int32_t>(now - g_nextBattMs) >= 0)
+  {
+    g_nextBattMs = now + BATTERY_PERIOD_MS;
+    const float v = analogReadMilliVolts(PIN_BATTERY) * BATTERY_DIVIDER * 0.001f;
+    // EMA: a single ADC sample jitters by tens of millivolts.
+    g_battV = (g_battV <= 0.0f) ? v : g_battV + BATTERY_EMA * (v - g_battV);
+    display::setBattery(g_battV);
   }
 
   // Never leave a menu covering the altitude in the air.

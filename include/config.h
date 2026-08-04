@@ -113,6 +113,16 @@
 // Horizontal travel needed to count as a swipe rather than a tap.
 #define TOUCH_SWIPE_MIN_PX   60
 
+// ---- Battery sense --------------------------------------------------------
+// GPIO12 through a 3:1 divider, per Waveshare's own battery example.
+// analogReadMilliVolts() is factory-calibrated, so the only scaling needed is
+// the divider ratio.
+#define PIN_BATTERY        12
+#define BATTERY_DIVIDER    3.0f
+#define BATTERY_PERIOD_MS  1000   // it does not move fast
+// The ADC is noisy sample to sample; smooth it so the readout is not twitchy.
+#define BATTERY_EMA        0.2f
+
 // ---- microSD (SDMMC, 4-bit) ----------------------------------------------
 // Cards must be FAT32 with an MBR partition scheme. ESP-IDF returns
 // FR_NO_FILESYSTEM on exFAT or GPT, which is what macOS defaults to for cards

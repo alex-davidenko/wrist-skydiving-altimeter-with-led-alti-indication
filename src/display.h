@@ -79,6 +79,10 @@ void startTask();
 // every iteration; the task paces its own redraws.
 void publish(const LedPattern &pattern, float altitudeM, float vspeedMps);
 
+// Battery volts, shown top-right opposite the vertical speed. Updated slowly
+// and independently, so the demo does not have to know about it.
+void setBattery(float volts);
+
 // Microseconds taken by the last full-screen fill — the expensive operation,
 // worth reporting rather than guessing at.
 uint32_t lastFillUs();
