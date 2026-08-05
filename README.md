@@ -501,18 +501,50 @@ with zero zone mismatches.
 
 ---
 
-## 8. Roadmap
+## 8. Where this is up to
 
-Planned, roughly in order:
+Everything below is on hardware and working: sensor, filter, zones, flight
+phases, panel, touch menu, SD logging with verified offline replay, USB drive
+mode, deep sleep, idle light sleep, weather-drift correction, and a full
+real-time demo jump.
 
-1. **Function button** for light sleep and wake.
-2. **Power off via the touch screen.** The AXS5106L controller is already on
-   our I2C bus at `0x63` and answers in the boot scan, so no new wiring.
-3. **Menu with stats and jump history**, now that logging exists to feed it.
-4. **Battery and power budget.** The board has VBAT, onboard charging and a
-   calibrated battery ADC (`bsp_battery` in the factory demo proves the
-   hardware). Nothing in the firmware sleeps or manages charge yet, and the
-   panel currently stays lit whenever powered — see `backlightPhase()`.
+**The next milestone is not software. It is one logged jump.** Every tuning
+number in this project came from simulation against assumed noise. A single
+jump with the logger running, and your handheld's readings noted at exit,
+opening and a couple of points under canopy, replaces all of it with
+measurement — and answers the one question nothing here can: how big the
+airflow error actually is (see §9).
+
+### Measured on hardware, for the record
+
+| | |
+|---|---|
+| raw sensor noise | 0.165-0.22 m RMS |
+| filtered noise | 0.037 m RMS, ~5x reduction |
+| zero repeatability | +/-0.021 m |
+| full-screen panel fill | 23.7 ms at 40 MHz SPI |
+| one digit blit | 2.6 ms |
+| current, panel active | ~70 mA (4.12 -> 3.90 V on a 21700 over 13 h) |
+| current, idle light sleep | **not yet measured** — the open question |
+| sensor temperature on-board | 38 C (28 C on the C3) |
+
+### Immediate next steps
+
+1. **Measure idle sleep current from the battery.** ~5 mA means the design
+   works and the hard-wired PWR LEDs (~4 mA, un-switchable) are what is left;
+   ~35 mA means the panel or regulator is not sleeping. `s` reports why it is
+   held awake if it never sleeps. It deliberately stays awake on USB.
+2. **Desolder the two PWR LEDs** once sleep is confirmed — they become the
+   dominant draw.
+3. **Move the GY-63 off-board on wires** (see §9 on self-heating), which is
+   also where the static port has to go.
+4. **Jump it.** Flight build, zeroed at the DZ, logging on.
+
+### Still planned
+
+- **Menu with stats and jump history**, now that logging exists to feed it.
+- **Charge management.** The board has VBAT and onboard charging; the firmware
+  reads the battery but does nothing about charging state.
 
 ## 9. Not done yet
 
