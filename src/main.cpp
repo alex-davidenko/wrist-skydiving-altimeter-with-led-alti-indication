@@ -228,6 +228,20 @@ static bool zeroHere()
   Serial.println(F("\nZeroing — hold still..."));
   led::set(Rgb{255, 255, 255});
 
+  // Wait out the warm-up drift before averaging. The sensor falls about a metre
+  // over the first seconds after a reset (see FILTER_SETTLE_MS), so a zero taken
+  // straight after power-up stores a pressure the board is about to leave, and
+  // the display then sits ~1 m low indefinitely. The half-vs-half drift test
+  // below does not catch it: the flight limit is 1.00 m and the warm-up spreads
+  // less than that across a 2 s average, so it passes and the error is stored.
+  const int32_t settleLeft = static_cast<int32_t>(g_filterSettledMs - millis());
+  if (settleLeft > 0)
+  {
+    Serial.printf("  sensor still warming, waiting %.1f s first.\n",
+                  settleLeft / 1000.0);
+    delay(static_cast<uint32_t>(settleLeft));
+  }
+
   double pSum = 0.0, aSum = 0.0, aSumSq = 0.0, aFirst = 0.0, aSecond = 0.0;
   uint16_t n = 0, nFirst = 0, nSecond = 0;
 
@@ -279,6 +293,7 @@ static bool zeroHere()
   saveCalibration();
 
   g_filter.reset(0.0f);
+  g_filterSettledMs = millis() + FILTER_SETTLE_MS;   // as after any filter reset
   g_zones.reset(0.0f);
 #if AUTOZERO_ENABLED
   g_groundRef.reset(millis());     // a manual zero supersedes any drift progress
@@ -1078,8 +1093,16 @@ void loop()
     // settle time scales with altitude and why the in-flight latch exists.
     if (g_calibrated)
     {
-      const float corr =
-          g_groundRef.update(g_filter.altitude(), g_filter.velocity(), now);
+      // Velocity is suppressed while the sensor settles, for the same reason
+      // the idle gate above ignores it: the post-reset warm-up drift reads as
+      // ~1 m/s, past AUTOZERO_SETTLED_MPS. Idle sleep resets the filter every
+      // 30 s, so that transient restarted the settle timer before it could
+      // ever reach the 3+ minutes required — auto-zero never ran at all, and
+      // a standing offset stayed put indefinitely. Passing 0 leaves the
+      // altitude-band test in ground_ref.cpp to detect a real pickup, which is
+      // the check that actually matters while the device is sitting still.
+      const float corr = g_groundRef.update(
+          g_filter.altitude(), settling ? 0.0f : g_filter.velocity(), now);
       if (corr != 0.0f)
       {
         const float ga = baro::pressureAltitude(g_groundPHpa, g_qnhHpa) + corr;

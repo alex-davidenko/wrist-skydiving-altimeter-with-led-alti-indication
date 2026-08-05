@@ -475,6 +475,16 @@ the answer. One field of on-device trace named it in a single run. **Simulate
 the physics you have modelled; trace the physics you have not.** `IDLE_TRACE`
 in `config.h` is that trace.
 
+The same transient had a second, quieter effect: it broke auto-zero completely.
+`AUTOZERO_SETTLED_MPS` is also 0.5 m/s, so every 30 s wake restarted the settle
+timer, which needs 3+ minutes to mature — it could never get there, so the
+correction never ran and a standing offset lived forever. Meanwhile a zero taken
+seconds after power-up stored a pressure the sensor was about to leave, putting
+the offset there in the first place. One transient, two symptoms, and the
+visible result was a device that sat at −1 m and stayed. `zeroHere()` now waits
+for the sensor before averaging, and the velocity is suppressed in both gates.
+`test_periodic_wake_transient_does_not_starve_autozero` pins the starvation down.
+
 **Sampling** is 40 Hz. The library's `read()` is blocking and does a pressure
 conversion followed by a temperature conversion — ~20 ms total at
 `OSR_ULTRA_HIGH` — so 40 Hz is near the practical ceiling. CSV output is

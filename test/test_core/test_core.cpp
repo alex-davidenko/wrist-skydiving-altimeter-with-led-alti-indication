@@ -706,6 +706,46 @@ static float runGref(GroundRef &g, float alt, float vs, float secs,
   return applied;
 }
 
+// A periodic velocity transient must not starve the settle timer.
+//
+// Idle sleep resets the filter every 30 s, and the sensor's warm-up drift then
+// reads as ~1 m/s for about a second — measured on hardware, and larger than
+// the 0.5 m/s settled threshold, so it lands in the settle-restart branch. With
+// a 3-minute settle requirement and a 30 s wake period the timer can never
+// mature: auto-zero stops running entirely and a standing offset lives forever,
+// which is exactly what a -1 m reading that never came back did. main.cpp now
+// suppresses the velocity while the filter settles; this is why it has to.
+static void test_periodic_wake_transient_does_not_starve_autozero()
+{
+  GroundRef g;
+  g.begin(kGref);
+  uint32_t clock = 0;
+  g.reset(clock);
+
+  // 20 minutes sitting still at 1 m, with the transient 1 s in every 30.
+  float alt     = 1.0f;
+  float applied = 0.0f;
+  for (int i = 0; i < 20 * 60 * 2; ++i)          // 0.5 s steps
+  {
+    clock += 500;
+    const bool spike = (clock % 30000) < 1000;
+    const float c = g.update(alt, spike ? 1.02f : 0.0f, clock);
+    applied += c;
+    alt -= c;
+  }
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, applied);        // starved: never corrects at all
+  TEST_ASSERT_FALSE(g.correcting());
+
+  // Suppressed the way the firmware now does it, the same 20 minutes converge.
+  GroundRef g2;
+  g2.begin(kGref);
+  clock = 0;
+  g2.reset(clock);
+  applied = runGref(g2, 1.0f, 0.0f, 20 * 60, &clock);
+  TEST_ASSERT_TRUE(g2.correcting());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 1.0f, applied);
+}
+
 static void test_autozero_timeout_scales_with_altitude()
 {
   GroundRef g;
@@ -881,6 +921,7 @@ int main(int, char **)
   RUN_TEST(test_climb_marker_fires_every_100m);
   RUN_TEST(test_full_jump_profile);
 
+  RUN_TEST(test_periodic_wake_transient_does_not_starve_autozero);
   RUN_TEST(test_autozero_timeout_scales_with_altitude);
   RUN_TEST(test_autozero_corrects_ground_drift);
   RUN_TEST(test_autozero_never_fires_at_altitude);
