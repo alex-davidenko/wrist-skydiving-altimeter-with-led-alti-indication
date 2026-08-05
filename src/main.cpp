@@ -81,6 +81,7 @@ static uint32_t g_wakeShowUntil = 0;    // button wake keeps the screen up
 // after an EXT0 light sleep — the pin is an RTC GPIO at that moment — so it
 // never armed and the release went through anyway.
 static uint32_t g_btnSwallowUntil = 0;
+static uint32_t g_filterSettledMs = 0;
 // Which site last restarted the quiet timer, recorded at the point of
 // assignment. Reading the source has been wrong four times about this.
 static const char *g_activeWho = "boot";
@@ -400,6 +401,7 @@ static void idleSleep()
   for (int i = 0; i < 4; i++)
     if (sensorRead()) g_rawAglM = aglFromPressure(g_pressureHpa);
   g_filter.reset(g_rawAglM);
+  g_filterSettledMs = millis() + FILTER_SETTLE_MS;
 
   const bool byButton = (cause == ESP_SLEEP_WAKEUP_EXT0);
   if (byButton)
@@ -919,6 +921,8 @@ void setup()
 
   touch::begin();
 
+  g_filterSettledMs = millis() + FILTER_SETTLE_MS;
+
   printHelp();
 #if BENCH_MODE
   Serial.println(F("\nt_ms,p_hpa,temp_c,raw_m,filt_m,vs_mps,sigma_m,zone"));
@@ -1060,8 +1064,9 @@ void loop()
       g_failStreak++;
     }
 
+    const bool settling = static_cast<int32_t>(now - g_filterSettledMs) < 0;
     if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M ||
-        fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS)
+        (!settling && fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS))
     {
       MARK_ACTIVE(now, fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M
                        ? "altitude" : "velocity");

@@ -170,6 +170,12 @@
 // the device is still down when the loop resumes, and would otherwise register
 // as a fresh press.
 #define BUTTON_WAKE_SWALLOW_MS    3000
+// After any filter reset the sensor is still settling — measured on hardware,
+// the die warms ~0.7 C over the first seconds and the resulting pressure drift
+// reads as up to 1 m/s of motion. That is real signal, not noise, so the
+// velocity gate correctly trips on it and restarted the quiet timer every boot
+// and every wake. Ignore the velocity gate for this long after a reset.
+#define FILTER_SETTLE_MS          4000
 //
 // OPEN BUG (unresolved as of Aug 2026): a BOOT wake still holds the panel for
 // 60 s instead of IDLE_WAKE_DISPLAY_MS. Traced cause is that the quiet timer is
@@ -196,9 +202,9 @@
 // USB, which is the only log we have. With this set, sleep proceeds while
 // plugged in: the CDC port drops when it sleeps and re-enumerates on wake,
 // which is itself the signal. Set back to 0 when done.
-#define IDLE_SLEEP_IGNORE_USB    0
+#define IDLE_SLEEP_IGNORE_USB    1
 // Print, once a second, which condition is holding the device awake.
-#define IDLE_TRACE               0    // a button wake shows the screen this long
+#define IDLE_TRACE               1    // a button wake shows the screen this long
 
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
