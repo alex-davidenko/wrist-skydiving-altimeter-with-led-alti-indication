@@ -182,6 +182,11 @@
 // foot digit changes 164 times a second and is unreadable.
 #define UNITS_FEET_DEFAULT   0        // 0 = metres, 1 = feet
 #define METRES_TO_FEET       3.28084f
+// Hysteresis on the displayed integer, as a fraction of one display step (1 m,
+// or 10 ft). A reading parked on a rounding boundary flips the number back and
+// forth on noise alone — the zone tracker has had hysteresis since early on for
+// exactly this reason, and the number never did. Costs nothing in accuracy.
+#define ALT_DISPLAY_HYST     0.15f
 #define MPS_TO_MPH           2.23694f
 
 // ---- Battery sense --------------------------------------------------------

@@ -47,6 +47,7 @@ uint16_t g_lastBg    = 0xDEAD;
 int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
 int32_t  g_lastBatt  = INT32_MIN;
+int32_t  g_lastAltN  = 0;             // last displayed value, in display steps
 char     g_lastTop[16] = {1, 0};      // deliberately not a string we ever set
 uint8_t  g_lastUnit  = 0xFF;
 const AltFont *g_lastAltFont = nullptr;
@@ -389,6 +390,17 @@ void renderUi(const Shared &st)
   }
 }
 
+// Rounding that sticks. The displayed integer only changes once the value has
+// cleared the halfway boundary by ALT_DISPLAY_HYST, so a reading sitting on
+// that boundary does not flicker between two numbers on sensor noise.
+int32_t roundSticky(float v, int32_t last)
+{
+  if (v > (float)last + 0.5f + ALT_DISPLAY_HYST ||
+      v < (float)last - 0.5f - ALT_DISPLAY_HYST)
+    return (int32_t)floorf(v + 0.5f);
+  return last;
+}
+
 // Composite one tabular digit cell off-screen and push it in a single
 // transaction.
 //
@@ -489,19 +501,18 @@ void renderFrame(const Shared &st)
   // foot digit changes 164 times a second, which is unreadable, and rounding is
   // what production altimeters do. Above 9999 ft the Viso form "12.3K" is used
   // instead of a fifth digit, so the digits stay large rather than shrinking.
+  // One display step is 1 m, or 10 ft — feet are rounded to 10 because at
+  // 50 m/s the foot digit changes 164 times a second and is unreadable.
+  const float step = st.feet ? 10.0f : 1.0f;
+  const float val  = st.feet ? st.altM * METRES_TO_FEET : st.altM;
+  g_lastAltN = roundSticky(val / step, g_lastAltN);
+  const int32_t alt = g_lastAltN * (int32_t)step;
+
   char buf[12];
-  if (st.feet)
-  {
-    const float ft = st.altM * METRES_TO_FEET;
-    if (fabsf(ft) >= 10000.0f)
-      snprintf(buf, sizeof(buf), "%.1fK", ft / 1000.0f);
-    else
-      snprintf(buf, sizeof(buf), "%ld", (long)lrintf(ft / 10.0f) * 10);
-  }
+  if (st.feet && labs(alt) >= 10000)
+    snprintf(buf, sizeof(buf), "%.1fK", alt / 1000.0f);   // Viso form, keeps digits big
   else
-  {
-    snprintf(buf, sizeof(buf), "%ld", (long)lrintf(st.altM));
-  }
+    snprintf(buf, sizeof(buf), "%ld", (long)alt);
 
   // Pick the face by measured width, not by counting characters: "9.8K" fits
   // the large one while "12.3K" and "4500" do not.
@@ -691,6 +702,7 @@ void setUnitsFeet(bool feet)
     g_lastStr[0]  = '\0';
     g_lastVs      = INT32_MIN;
     g_lastBg      = 0xDEAD;
+    g_lastAltN    = 0;
   }
 }
 
