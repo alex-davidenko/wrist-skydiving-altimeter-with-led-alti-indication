@@ -48,8 +48,9 @@ int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
 int32_t  g_lastBatt  = INT32_MIN;
 char     g_lastTop[16] = {1, 0};      // deliberately not a string we ever set
+uint8_t  g_lastUnit  = 0xFF;
 const AltFont *g_lastAltFont = nullptr;
-char     g_lastStr[10] = {0};
+char     g_lastStr[12] = {0};
 
 // Scratch cell for compositing one digit off-screen. Big enough for the widest
 // advance at the tallest ink; lives in PSRAM because internal RAM is precious.
@@ -272,6 +273,7 @@ void message(const char *line1, const char *line2)
   g_lastAlt = INT32_MIN;
   g_lastVs = INT32_MIN;
   g_lastBatt = INT32_MIN;
+  g_lastUnit = 0xFF;
   g_lastAltFont = nullptr;
   g_lastStr[0] = '\0';
 }
@@ -390,12 +392,29 @@ void renderUi(const Shared &st)
 // the cell in RAM and blitting it once removes the intermediate state, and
 // also sidesteps Arduino_GFX's custom-font path entirely, whose background
 // fill and baseline are both unreliable (see the notes in renderFrame).
+// Advance of one glyph. Digits share a uniform tabular advance so a live number
+// does not jitter; '.' and the 'K' suffix are proportional, which is what lets
+// "12.3K" fit the width four digits occupy.
+int16_t glyphAdvance(const AltFont *af, char ch)
+{
+  if (ch < af->font->first || ch > af->font->last) return 0;
+  return af->font->glyph[ch - af->font->first].xAdvance;
+}
+
+int16_t textWidth(const AltFont *af, const char *s)
+{
+  int16_t w = 0;
+  for (const char *p = s; *p; p++) w += glyphAdvance(af, *p);
+  return w;
+}
+
 void blitDigit(const AltFont *af, char ch, int16_t penX, int16_t baseline,
                uint16_t ink, uint16_t bg)
 {
   if (!g_cell) return;
 
-  const int16_t cw = af->advance;
+  const int16_t cw = glyphAdvance(af, ch);
+  if (cw <= 0) return;
   const int16_t chh = af->inkBottom - af->inkTop;
   for (int32_t i = 0; i < (int32_t)cw * chh; i++) g_cell[i] = bg;
 
@@ -452,6 +471,7 @@ void renderFrame(const Shared &st)
     g_lastVs      = INT32_MIN;
     g_lastBatt    = INT32_MIN;
     g_lastTop[0]  = 1; g_lastTop[1] = 0;
+    g_lastUnit    = 0xFF;
     g_lastAltFont = nullptr;
     g_lastStr[0]  = '\0';        // nothing to erase, the fill did it
   }
@@ -461,56 +481,57 @@ void renderFrame(const Shared &st)
   // in, so the text was redundant and the digits get the whole screen.
   // Units are converted here and nowhere else. Feet round to 10 — at 50 m/s the
   // foot digit changes 164 times a second, which is unreadable, and rounding is
-  // what production altimeters do.
-  int32_t alt;
+  // what production altimeters do. Above 9999 ft the Viso form "12.3K" is used
+  // instead of a fifth digit, so the digits stay large rather than shrinking.
+  char buf[12];
   if (st.feet)
   {
-    alt = (int32_t)lrintf(st.altM * METRES_TO_FEET / 10.0f) * 10;
+    const float ft = st.altM * METRES_TO_FEET;
+    if (fabsf(ft) >= 10000.0f)
+      snprintf(buf, sizeof(buf), "%.1fK", ft / 1000.0f);
+    else
+      snprintf(buf, sizeof(buf), "%ld", (long)lrintf(ft / 10.0f) * 10);
   }
   else
   {
-    alt = (int32_t)lrintf(st.altM);
+    snprintf(buf, sizeof(buf), "%ld", (long)lrintf(st.altM));
   }
-  char buf[10];
-  snprintf(buf, sizeof(buf), "%ld", (long)alt);
-  const uint8_t len = strlen(buf);
 
-  // Two typefaces baked at the size they are drawn, rather than one small font
-  // magnified — see tools/make_font.py. Big fits 3 glyphs, Med fits 4.
-  //
-  // Layout comes from the font's own measured ink extents, not from
-  // getTextBounds: Arduino_GFX invents a baseline of yAdvance*2/3, flagged
-  // "arbitrary" in the library, which put the digits off-centre and clipped.
-  // The number gets bigger as you get lower, which is when it matters most:
-  // 5 digits (above 10,000 ft) use the smallest face, 3 digits the largest.
-  const AltFont *af = (len <= 3) ? &kFontAltBig
-                    : (len == 4) ? &kFontAltMed
-                                 : &kFontAltSmall;
+  // Pick the face by measured width, not by counting characters: "9.8K" fits
+  // the large one while "12.3K" and "4500" do not.
+  const int16_t usable = g_w - 8;
+  const AltFont *af = (textWidth(&kFontAltBig, buf) <= usable) ? &kFontAltBig
+                                                              : &kFontAltMed;
+  const int16_t total = textWidth(af, buf);
 
   if (strcmp(buf, g_lastStr) != 0 || af != g_lastAltFont)
   {
     const int16_t bandY = ALT_TOP_BAND;
     const int16_t bandH = g_h - ALT_TOP_BAND;
     const int16_t inkH  = af->inkBottom - af->inkTop;
-    const int16_t x0 = (g_w - len * af->advance) / 2;
+    const int16_t x0 = (g_w - total) / 2;
     const int16_t baseline = bandY + (bandH - inkH) / 2 - af->inkTop;
 
-    // A different digit count or typeface moves every cell, so the band has to
-    // be cleared. Otherwise only the digits that actually changed are touched —
+    // A different face, length or width moves every glyph, so the band has to
+    // be cleared. Otherwise only the characters that changed are touched —
     // usually just the last one, which is what keeps this cheap at 20 Hz.
-    const bool moved = (strlen(g_lastStr) != len) || (af != g_lastAltFont);
+    const bool moved = (af != g_lastAltFont) ||
+                       (strlen(g_lastStr) != strlen(buf)) ||
+                       (textWidth(af, g_lastStr) != total);
     if (moved) g_gfx->fillRect(0, bandY, g_w, bandH, bg);
 
-    for (uint8_t i = 0; i < len; i++)
+    int16_t pen = x0;
+    for (uint8_t i = 0; buf[i]; i++)
     {
-      if (!moved && g_lastStr[i] == buf[i]) continue;
-      blitDigit(af, buf[i], x0 + i * af->advance, baseline, ink, bg);
+      if (moved || g_lastStr[i] != buf[i])
+        blitDigit(af, buf[i], pen, baseline, ink, bg);
+      pen += glyphAdvance(af, buf[i]);
     }
 
     strncpy(g_lastStr, buf, sizeof(g_lastStr) - 1);
     g_lastStr[sizeof(g_lastStr) - 1] = '\0';
     g_lastAltFont = af;
-    g_lastAlt     = alt;
+    g_lastAlt     = (int32_t)lrintf(st.altM);
   }
 
   // Top strip: a message if one is set, otherwise vertical speed.
@@ -520,7 +541,8 @@ void renderFrame(const Shared &st)
     g_gfx->fillRect(0, 0, g_w - 70, ALT_TOP_BAND, bg);   // leave the battery
     strncpy(g_lastTop, st.top, sizeof(g_lastTop) - 1);
     g_lastTop[sizeof(g_lastTop) - 1] = '\0';
-    g_lastVs = INT32_MIN;                                 // force a redraw below
+    g_lastVs   = INT32_MIN;                               // force a redraw below
+    g_lastUnit = 0xFF;                                    // the label was wiped
   }
 
   if (st.top[0])
@@ -552,6 +574,23 @@ void renderFrame(const Shared &st)
       g_gfx->print(vbuf);
       g_lastVs = vs;
     }
+  }
+
+  // Units, centred between the speed and the battery. Permanent, not implied:
+  // reading feet as metres is a factor-3.28 error, so which one is on screen
+  // must never be a matter of memory.
+  const uint8_t unit = st.feet ? 1 : 0;
+  if (unit != g_lastUnit)
+  {
+    const char *label = st.feet ? "FT" : "M";
+    const int16_t w = (int16_t)strlen(label) * 18;        // size 3 glyph advance
+    g_gfx->fillRect(196 - 24, 0, 56, ALT_TOP_BAND, bg);
+    g_gfx->setFont(NULL);
+    g_gfx->setTextColor(ink, bg);
+    g_gfx->setTextSize(3, 3, 0);
+    g_gfx->setCursor(196 - w / 2, 2);
+    g_gfx->print(label);
+    g_lastUnit = unit;
   }
 
   // Battery, top-right opposite the speed. Quantised to 10 mV so ADC jitter

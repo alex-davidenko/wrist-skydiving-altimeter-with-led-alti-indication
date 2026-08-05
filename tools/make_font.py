@@ -25,12 +25,18 @@ FONT_INDEX = 0            # Avenir Next Bold
 # so any codepoint skipped between first and last shifts every glyph after it.
 # Leaving out '.' and '/' here once made every digit render as digit+2, and
 # '8'/'9' index past the end of the array entirely.
-CHARS = "-./0123456789"
+CHARS = "-./0123456789:;<=>?@ABCDEFGHIJK"
 # Glyphs actually drawn. Anything in CHARS but not here is emitted as a blank
 # placeholder purely to keep the array contiguous — '/' in particular rises
 # above cap height and drops below the baseline, so rendering it at digit size
-# would breach the 127 px yOffset limit for no benefit.
-USED = "-.0123456789"
+# would breach the 127 px yOffset limit for no benefit. The run has to reach 'K'
+# because high feet are shown Viso-style as "12.3K", which keeps the digits big
+# instead of shrinking them to fit five of them.
+USED = "-.0123456789K"
+# 'K' is a suffix, not a digit: rendered at this fraction of the digit size so
+# "12.3K" fits the width a four-digit number occupies. Altimeters show it that
+# way too — a full-height K reads as a fifth digit.
+SUFFIX_SCALE = 0.55
 PAD = 40
 
 
@@ -93,7 +99,8 @@ def build(name, cap_target):
     font = load(size_for_cap(cap_target))
     glyphs, bitmap = [], []
 
-    rendered = {ch: render(font, ch) for ch in USED}
+    small = load(max(6, int(size_for_cap(cap_target) * SUFFIX_SCALE)))
+    rendered = {ch: render(font if ch != 'K' else small, ch) for ch in USED}
 
     # Tabular: every glyph gets the widest digit's advance, and is centred in it.
     widest = max(rendered[c][1] for c in "0123456789")
@@ -104,6 +111,10 @@ def build(name, cap_target):
             glyphs.append((len(bitmap), 0, 0, advance, 0, 0))
             continue
         rows, w, h, _, yoff = rendered[ch]
+        # Digits keep the uniform tabular advance so a live number does not
+        # jitter sideways. '.' and 'K' get their natural width instead — five
+        # tabular cells would not fit, and a full-width period looks wrong.
+        adv = advance if ch in "0123456789" else w + 4
         offset = len(bitmap)
         bits = [b for row in rows for b in row]
         for i in range(0, len(bits), 8):
@@ -111,7 +122,7 @@ def build(name, cap_target):
             for j, b in enumerate(bits[i:i + 8]):
                 byte |= b << (7 - j)
             bitmap.append(byte)
-        glyphs.append((offset, w, h, advance, (advance - w) // 2, yoff))
+        glyphs.append((offset, w, h, adv, (adv - w) // 2, yoff))
 
     if len(bitmap) > 65535:
         sys.exit(f"{name}: bitmap {len(bitmap)} bytes exceeds uint16 offsets")
@@ -175,7 +186,9 @@ def main():
     WIDTH, BAND = 320 - 8, 118
     # Five digits are only needed above 10,000 ft. The sizing falls out nicely:
     # the number gets BIGGER as you get lower, which is when it matters most.
-    for name, digits in (("FontAltBig", 3), ("FontAltMed", 4), ("FontAltSmall", 5)):
+    # No five-digit face: metres never exceed four digits, and high feet use
+    # the "12.3K" form rather than shrinking to fit five.
+    for name, digits in (("FontAltBig", 3), ("FontAltMed", 4)):
         cap = cap_that_fits(digits, WIDTH, BAND)
         body, adv, h = build(name, cap)
         print(body)
