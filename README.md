@@ -549,6 +549,39 @@ with zero zone mismatches.
 
 ---
 
+## 7b. Power, measured
+
+With a multimeter in series with the cell, and the two hard-wired PWR LED
+resistors desoldered:
+
+| state | current | on 1000 mAh |
+|---|---|---|
+| active, backlight on | 110 mA | ~9 h |
+| idle light sleep, floor | 2.7 mA | — |
+| idle light sleep, average | ~3-5 mA | ~10 days |
+| deep sleep (auto-off) | 1.2 mA | ~38 days |
+
+A realistic jump day — 16 h idle plus six jumps at ~20 min of active display —
+comes to about **285 mAh**, comfortable on a 1000 mAh cell.
+
+Two results worth keeping, because both close off work that looked worthwhile:
+
+**Power-gating the sensor through a GPIO is not worth doing.** Unsoldering the
+MS5611 entirely during deep sleep moved the draw from 1.2 mA to 1.1 mA. The
+sensor is 0.1 mA. A switched supply would recover that 0.1 mA and add a warm-up
+transient on every wake — the same transient documented in §6, which has already
+cost two bugs.
+
+**The 1.1 mA floor is the board, not the firmware.** An ESP32-S3 in deep sleep
+draws 10-20 uA, so essentially all of it is peripherals that stay powered:
+regulator quiescent, the charge IC, the panel controller, the touch controller
+and the SD card. Nothing in software reaches them. This is the floor for this
+PCB; getting below it means a board with a high-side load switch over everything
+outside the RTC domain and an LDO with single-digit-uA quiescent.
+
+Not yet tried: the JD9853's sleep-in command (`0x10`) before light sleep, which
+should take a bite out of the 2.7 mA idle figure.
+
 ## 8. Where this is up to
 
 Everything below is on hardware and working: sensor, filter, zones, flight
@@ -574,20 +607,20 @@ airflow error actually is (see §9).
 | zero repeatability | +/-0.021 m |
 | full-screen panel fill | 23.7 ms at 40 MHz SPI |
 | one digit blit | 2.6 ms |
-| current, panel active | ~70 mA (4.12 -> 3.90 V on a 21700 over 13 h) |
-| current, idle light sleep | **not yet measured** — the open question |
+| current, panel active | **110 mA**, backlight on (meter in series) |
+| current, idle light sleep | **2.7 mA** floor; ~3-5 mA average incl. 30 s wakes |
+| current, deep sleep | **1.2 mA** — board peripherals, not the MCU |
+| deep sleep, sensor unsoldered | 1.1 mA — the MS5611 is only 0.1 mA of it |
 | sensor temperature, on-board | 38 C — the reason it was moved |
 | sensor temperature, on wires | **27 C** — thermal plume resolved |
 | post-reset warm-up drift | 1 m over ~1 s, reads as 1.02 m/s (see §6) |
 
 ### Immediate next steps
 
-1. **Measure idle sleep current from the battery.** ~5 mA means the design
-   works and the hard-wired PWR LEDs (~4 mA, un-switchable) are what is left;
-   ~35 mA means the panel or regulator is not sleeping. `s` reports why it is
-   held awake if it never sleeps. It deliberately stays awake on USB.
-2. **Desolder the two PWR LEDs** once sleep is confirmed — they become the
-   dominant draw.
+1. ~~Measure idle sleep current~~ and ~~desolder the PWR LEDs~~ — **both done**,
+   see the table above and §7b. Idle sleep is real: 110 mA -> 2.7 mA.
+2. **Pull the SD card and re-measure deep sleep.** The last untested suspect in
+   the 1.1 mA floor, and cards vary hugely in idle draw. Ten-second test.
 3. ~~Move the GY-63 off-board on wires~~ — **done**, sensor now reads 27 C
    instead of 38 C. The static port still has to go there.
 4. **Jump it.** Flight build, zeroed at the DZ, logging on.
