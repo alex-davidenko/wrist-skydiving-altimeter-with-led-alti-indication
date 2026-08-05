@@ -122,7 +122,14 @@
 // The settle time scales with altitude, per Alti-2's published behaviour
 // (~10 min at 500 ft, "several hours" at 12,000 ft), which is what makes an
 // aircraft holding at altitude safe: 4 min at 25 m, but 3.3 hours at 4000 m.
-#define AUTOZERO_ENABLED         1
+// FLIGHT ONLY. The constants below are absolute metres, which are negligible
+// against 300 m flight bands but enormous against bench ones: a 1 m settle band
+// spans three bench zones, and a 0.5 m/min slew walks a board held at 1.35 m
+// down through red, blinking red and off in three minutes without it moving.
+// That looks exactly like a bug while bench testing. Test auto-zero with a
+// flight build sitting on a desk, where altitude is ~0 and it does the right
+// thing.
+#define AUTOZERO_ENABLED         (!BENCH_MODE)
 #define AUTOZERO_SETTLED_MPS     0.5f
 // 1 m band, so a walk upstairs restarts the timer rather than being absorbed.
 #define AUTOZERO_BAND_M          1.0f
@@ -149,6 +156,10 @@
 //
 // Climbing at 5 m/s clears 25 m in five seconds, so a 30 s wake still catches
 // the climb by ~150 m, long before anything depends on it.
+// Enabled in BOTH builds. Unlike auto-zero, nothing here is scale-sensitive —
+// the 25 m ceiling is simply always satisfied on a desk — and the bench is
+// where the current draw actually gets measured. It only sleeps after 60 s of
+// stillness off USB, so it does not interrupt hand testing.
 #define IDLE_SLEEP_ENABLED       1
 #define IDLE_WAKE_PERIOD_S       30
 #define IDLE_MAX_ALT_M           25.0f    // above this, never sleep
