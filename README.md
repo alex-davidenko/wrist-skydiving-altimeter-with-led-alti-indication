@@ -90,6 +90,22 @@ Two firmware environments, same source, one flag apart:
 | `bench` | divided by 1000 | testing by hand on a desk (default) |
 | **`flight`** | the real ones | **this is what you jump with** |
 
+What the flag actually changes — everything else is identical in both:
+
+| | bench | flight |
+|---|---|---|
+| freefall zone thresholds | metre-scale | 800 / 1200 / 1500 / 4500 m |
+| filter tuning | sigma_a 0.05, sigma_m 0.25 | 3.0 / 0.60 |
+| zeroing accept limits | tighter | looser |
+| flight-phase machine + landing ladder | not compiled | active |
+| weather-drift auto-zero | **not compiled** | active |
+| idle light sleep | active | active |
+
+Auto-zero is flight-only because its constants are absolute metres: a 1 m settle
+band spans three bench zones, so a board held still would appear to walk down
+through them. Idle sleep is in both — nothing about it is scale-sensitive, and
+the bench is where current draw gets measured.
+
 ```bash
 .venv/bin/pio run -e flight --target upload && .venv/bin/pio device monitor
 ```
