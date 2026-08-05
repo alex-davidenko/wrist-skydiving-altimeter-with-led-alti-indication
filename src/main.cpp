@@ -562,7 +562,11 @@ static void printStatus()
   Serial.printf("LED brightness: %u\n", led::brightness());
   Serial.printf("units         : %s (display only; logs stay metric)\n",
                 display::unitsFeet() ? "feet / mph" : "metres / m per s");
-  Serial.printf("battery       : %.2f V\n", g_battV);
+  // Three decimals here, two on screen. A 2-decimal readout resolves 0.01 V,
+  // which over a 6 h idle run is a single LSB — too coarse to measure a few
+  // milliamps. The ADC has far more resolution than that, so the console gets
+  // it and the estimate stops being guesswork.
+  Serial.printf("battery       : %.3f V\n", g_battV);
   Serial.printf("reset reason  : %s\n", g_resetReason);
 #if IDLE_SLEEP_ENABLED
   Serial.printf("idle sleep    : %s (needs alt<%.0fm, still, %ds quiet)\n",
