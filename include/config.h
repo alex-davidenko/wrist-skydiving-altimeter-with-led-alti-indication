@@ -165,46 +165,46 @@
 #define IDLE_MAX_ALT_M           25.0f    // above this, never sleep
 #define IDLE_MAX_VSPEED_MPS      0.5f
 #define IDLE_QUIET_BEFORE_MS     60000    // must be idle this long before first sleep
-#define IDLE_WAKE_DISPLAY_MS     20000
+#define IDLE_WAKE_DISPLAY_MS     20000   // a button wake shows the screen this long
 // How long after a button wake to ignore a button release. The press that woke
 // the device is still down when the loop resumes, and would otherwise register
 // as a fresh press.
 #define BUTTON_WAKE_SWALLOW_MS    3000
-// After any filter reset the sensor is still settling — measured on hardware,
-// the die warms ~0.7 C over the first seconds and the resulting pressure drift
-// reads as up to 1 m/s of motion. That is real signal, not noise, so the
-// velocity gate correctly trips on it and restarted the quiet timer every boot
-// and every wake. Ignore the velocity gate for this long after a reset.
-#define FILTER_SETTLE_MS          4000
+// After any filter reset the sensor is still settling, and the velocity gate
+// below must ignore it. Measured on hardware from a warm boot: the die warmed
+// 26.4 -> 27.1 C, raw altitude drifted 1 m downward, and the filter read that
+// as up to 1.02 m/s of descent — real signal, not noise. The excursion ran
+// 0.5-1.3 s after the reset. 6 s is that with room for a cold board, which
+// drifts for longer, and it costs nothing: IDLE_QUIET_BEFORE_MS is 60 s, and
+// the altitude gate keeps working throughout.
+#define FILTER_SETTLE_MS          6000
+
+// Idle sleep was, for a long time, held off for 60 s after every boot and every
+// BOOT-button wake instead of IDLE_WAKE_DISPLAY_MS. The cause was not a timer
+// bug at all: the sensor die warms about 0.7 C in the seconds after a reset,
+// and the resulting pressure drift is real motion as far as the filter is
+// concerned — measured at up to 1.02 m/s, well past IDLE_MAX_VSPEED_MPS. The
+// idle gate was doing exactly what it was told. FILTER_SETTLE_MS above now
+// suspends the velocity gate until the sensor has settled.
 //
-// OPEN BUG (unresolved as of Aug 2026): a BOOT wake still holds the panel for
-// 60 s instead of IDLE_WAKE_DISPLAY_MS. Traced cause is that the quiet timer is
-// restarted ~1.1 s after the wake — the button release — despite the swallow
-// above. Removing the in-flight latch from mayIdleSleep() did fix a separate
-// 120 s hold, so the remaining 60 s is the quiet timer alone.
+// Worth remembering how it was found: four hypotheses from reading this source
+// were wrong, and a simulation "ruled out" the true cause because it fed a
+// stationary altitude and so contained no thermal drift to reproduce. The
+// on-device trace named it in one run, in one field. Simulate the physics you
+// have modelled; trace the physics you have not.
+
+// DEBUG AIDS. Set either to 1 to investigate idle sleep — the trace names the
+// single blocking condition once a second, and the site that last restarted the
+// quiet timer, which is far faster than reasoning about the interacting timers.
 //
-// Ruled out by simulation, do not re-check: filter velocity transient after
-// reset (peaks 0.47 m/s against a 1.0 threshold), and the wake path itself
-// setting g_activeSinceMs (that line was removed).
-//
-// Next step: set IDLE_TRACE 1, press BOOT after it sleeps, and read the "set
-// by:" field on the trace line. Every g_activeSinceMs assignment is tagged via
-// MARK_ACTIVE, so that field names the exact site restarting the timer — no
-// hypothesis needed. Expect "button-release" if the swallow is still not
-// catching it. Four hypotheses from reading the source have been wrong; the
-// trace was right immediately both times it was consulted.
-// DEBUG AIDS, both off. Set either to 1 to investigate idle sleep again — the
-// trace names the single blocking condition once a second and is far faster
-// than reasoning about the interacting timers. See the OPEN BUG note below.
-//
-// Normally a connected host blocks sleep so the panel does not
-// go dark mid-session — but that also makes the behaviour unobservable over
-// USB, which is the only log we have. With this set, sleep proceeds while
-// plugged in: the CDC port drops when it sleeps and re-enumerates on wake,
-// which is itself the signal. Set back to 0 when done.
+// Normally a connected host blocks sleep so the panel does not go dark
+// mid-session — but that also makes the behaviour unobservable over USB, which
+// is the only log we have. With this set, sleep proceeds while plugged in: the
+// CDC port drops when it sleeps and re-enumerates on wake, which is itself the
+// signal. Set back to 0 when done.
 #define IDLE_SLEEP_IGNORE_USB    1
 // Print, once a second, which condition is holding the device awake.
-#define IDLE_TRACE               1    // a button wake shows the screen this long
+#define IDLE_TRACE               1
 
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
