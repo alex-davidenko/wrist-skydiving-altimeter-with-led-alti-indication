@@ -170,41 +170,24 @@
 // the device is still down when the loop resumes, and would otherwise register
 // as a fresh press.
 #define BUTTON_WAKE_SWALLOW_MS    3000
-// After any filter reset the sensor is still settling, and the velocity gate
-// below must ignore it. Measured on hardware from a warm boot: the die warmed
-// 26.4 -> 27.1 C, raw altitude drifted 1 m downward, and the filter read that
-// as up to 1.02 m/s of descent — real signal, not noise. The excursion ran
-// 0.5-1.3 s after the reset. 6 s is that with room for a cold board, which
-// drifts for longer, and it costs nothing: IDLE_QUIET_BEFORE_MS is 60 s, and
-// the altitude gate keeps working throughout.
+// How long after a filter reset to ignore the velocity gate below. The sensor
+// is still settling: measured on hardware, the die warms 26.4 -> 27.1 C, raw
+// altitude drifts 1 m downward and the filter reads up to 1.02 m/s of descent —
+// real motion, not noise, so the gate tripped and restarted the quiet timer on
+// every boot and every wake. The excursion ran 0.5-1.3 s after the reset; 6 s
+// leaves room for a cold board, which drifts longer. Costs nothing, since
+// IDLE_QUIET_BEFORE_MS is 60 s. The altitude gate still applies throughout.
 #define FILTER_SETTLE_MS          6000
 
-// Idle sleep was, for a long time, held off for 60 s after every boot and every
-// BOOT-button wake instead of IDLE_WAKE_DISPLAY_MS. The cause was not a timer
-// bug at all: the sensor die warms about 0.7 C in the seconds after a reset,
-// and the resulting pressure drift is real motion as far as the filter is
-// concerned — measured at up to 1.02 m/s, well past IDLE_MAX_VSPEED_MPS. The
-// idle gate was doing exactly what it was told. FILTER_SETTLE_MS above now
-// suspends the velocity gate until the sensor has settled.
-//
-// Worth remembering how it was found: four hypotheses from reading this source
-// were wrong, and a simulation "ruled out" the true cause because it fed a
-// stationary altitude and so contained no thermal drift to reproduce. The
-// on-device trace named it in one run, in one field. Simulate the physics you
-// have modelled; trace the physics you have not.
-
-// DEBUG AIDS. Set either to 1 to investigate idle sleep — the trace names the
+// DEBUG AIDS, both off. Set to 1 to investigate idle sleep: the trace names the
 // single blocking condition once a second, and the site that last restarted the
-// quiet timer, which is far faster than reasoning about the interacting timers.
-//
-// Normally a connected host blocks sleep so the panel does not go dark
-// mid-session — but that also makes the behaviour unobservable over USB, which
-// is the only log we have. With this set, sleep proceeds while plugged in: the
-// CDC port drops when it sleeps and re-enumerates on wake, which is itself the
-// signal. Set back to 0 when done.
-#define IDLE_SLEEP_IGNORE_USB    1
-// Print, once a second, which condition is holding the device awake.
-#define IDLE_TRACE               1
+// quiet timer. Far faster than reasoning about the interacting timers — it found
+// the bug above in one run, after four hypotheses from reading the source were
+// wrong. IGNORE_USB is needed with it: normally a connected host blocks sleep,
+// which also makes the behaviour unobservable over the only log we have. With
+// it set, the CDC port drops on sleep and re-enumerates on wake.
+#define IDLE_SLEEP_IGNORE_USB    0
+#define IDLE_TRACE               0
 
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.

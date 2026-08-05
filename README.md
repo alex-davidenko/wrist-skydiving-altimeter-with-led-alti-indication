@@ -454,6 +454,27 @@ digits change. Cost is 18 KB of flash.
 There is no zone label: the background colour already says which zone you are
 in, so the text was redundant.
 
+**Idle sleep, and the settling transient.** Off USB the device light-sleeps
+after 60 s of stillness below 25 m, waking every 30 s to check; a BOOT press
+wakes it and shows the panel for 20 s.
+
+Getting the 20 s to hold took finding a non-obvious fault. The panel stayed lit
+for 60 s after every wake instead, because the idle gate treats > 0.5 m/s as
+motion and restarts the quiet timer — and the sensor genuinely produces that
+after a reset. Measured: the die warms 26.4 → 27.1 °C over the first seconds,
+raw altitude drifts a full metre downward, and the filter reports up to
+**1.02 m/s of descent**. Real signal, correctly detected. So `FILTER_SETTLE_MS`
+suspends the velocity gate for 6 s after any filter reset; the altitude gate
+keeps working throughout.
+
+Two things this cost, worth recording. Four hypotheses drawn from reading the
+source were wrong. And a simulation *excluded the true cause* — it fed a
+stationary altitude, so it contained no thermal drift to reproduce, and its
+"ruled out, do not re-check" verdict was written into `config.h` directly over
+the answer. One field of on-device trace named it in a single run. **Simulate
+the physics you have modelled; trace the physics you have not.** `IDLE_TRACE`
+in `config.h` is that trace.
+
 **Sampling** is 40 Hz. The library's `read()` is blocking and does a pressure
 conversion followed by a temperature conversion — ~20 ms total at
 `OSR_ULTRA_HIGH` — so 40 Hz is near the practical ceiling. CSV output is
@@ -547,6 +568,7 @@ airflow error actually is (see §9).
 | current, idle light sleep | **not yet measured** — the open question |
 | sensor temperature, on-board | 38 C — the reason it was moved |
 | sensor temperature, on wires | **27 C** — thermal plume resolved |
+| post-reset warm-up drift | 1 m over ~1 s, reads as 1.02 m/s (see §6) |
 
 ### Immediate next steps
 
