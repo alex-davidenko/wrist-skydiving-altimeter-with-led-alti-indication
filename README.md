@@ -559,7 +559,7 @@ resistors desoldered:
 | active, backlight on | 110 mA | ~9 h |
 | idle light sleep, floor | 2.7 mA | — |
 | idle light sleep, average | ~3-5 mA | ~10 days |
-| deep sleep (auto-off) | 1.2 mA | ~38 days |
+| deep sleep (auto-off) | **765 uA** | ~54 days |
 
 A realistic jump day — 16 h idle plus six jumps at ~20 min of active display —
 comes to about **285 mAh**, comfortable on a 1000 mAh cell.
@@ -577,15 +577,36 @@ cost two bugs.
 off. The SD card was measured and ruled out at **50 uA**. What remains splits in
 two, and the distinction is the difference between a firmware fix and a respin:
 
-*Reachable from software.* `PIN_TOUCH_RST` (GPIO47) and `PIN_LCD_RST` (GPIO40)
-both float during deep sleep, which leaves those controllers running. The
-AXS5106L is self-clocked and keeps scanning the panel once the S3 stops talking
-to it — typically 1-3 mA for that class of part, so it is the prime suspect for
-most of the floor. Driving either reset low before sleeping and latching it with
-`gpio_hold_en()` + `gpio_deep_sleep_hold_en()` should hold them down; both pins
-are outside the RTC bank (GPIO0-21) so they need the digital-hold path, not RTC
-hold. The JD9853 also has a sleep-in command (`0x10`) if reset is too blunt.
-Nothing needs touch during deep sleep — wake is EXT0 on BOOT.
+*Reachable from software, and measured.* `PIN_TOUCH_RST` (GPIO47) and
+`PIN_LCD_RST` (GPIO40) both float during deep sleep, leaving those controllers
+running. Neither pin is on the headers, so this was tested in firmware:
+`DEEPSLEEP_HOLD_TOUCH_RST` and `DEEPSLEEP_HOLD_LCD_RST` in `config.h` drive a
+reset low before `esp_deep_sleep_start()` and latch it with the digital-pad hold
+(both pins are outside the RTC bank, GPIO0-21, so `rtc_gpio_hold` does not
+apply). Results:
+
+| holds | deep sleep |
+|---|---|
+| none | 1200 uA, jittering 1150-1250 |
+| touch + LCD | 950 uA |
+| **touch only** | **765 uA** — shipped |
+
+Touch is worth **435 uA**, and the jitter that disappeared with it was the
+AXS5106L's scan cycle — it is self-clocked and keeps scanning with nothing
+listening. Waveshare's driver has no power management for that part at all, so
+the reset line is the only lever short of the datasheet.
+
+**The LCD hold measured 185 uA worse than doing nothing**, and that is the
+instructive one. `display::sleep()` already sends `0x28` and `0x10`, so the panel
+was properly asleep before its reset was ever touched; the hold added nothing and
+drew current through the pull-up on that line for the privilege. Holding a reset
+low is not free, and it is only worth it when the part has no sleep path of its
+own.
+
+The hold survives the wake, so `setup()` releases both before anything touches a
+peripheral — without that the panel and touch stay in reset for the whole
+session. That release is unconditional, since the previous boot may have been a
+build with holds on.
 
 *Not reachable.* Regulator quiescent and the charge IC. If those turn out to be
 the residue, that is the floor for this PCB, and getting under it means a board
@@ -635,7 +656,7 @@ airflow error actually is (see §9).
 | one digit blit | 2.6 ms |
 | current, panel active | **110 mA**, backlight on (meter in series) |
 | current, idle light sleep | **2.7 mA** floor; ~3-5 mA average incl. 30 s wakes |
-| current, deep sleep | **1.2 mA** — board peripherals, not the MCU |
+| current, deep sleep | **765 uA** with touch held in reset (was 1.2 mA) |
 | deep sleep, sensor unsoldered | 1.1 mA — the MS5611 is only 0.1 mA of it |
 | sensor temperature, on-board | 38 C — the reason it was moved |
 | sensor temperature, on wires | **27 C** — thermal plume resolved |
@@ -645,10 +666,9 @@ airflow error actually is (see §9).
 
 1. ~~Measure idle sleep current~~ and ~~desolder the PWR LEDs~~ — **both done**,
    see the table above and §7b. Idle sleep is real: 110 mA -> 2.7 mA.
-2. **Attribute the 1.1 mA deep-sleep floor.** SD card measured and ruled out at
-   50 uA. Next: in deep sleep, tie GPIO47 (touch RST) then GPIO40 (LCD RST) to
-   GND and watch the meter. See §7b — the touch controller keeps scanning on its
-   own once the S3 stops talking to it, and is the prime suspect.
+2. ~~Attribute the deep-sleep floor~~ — **done**, see §7b. 1.2 mA -> 765 uA by
+   holding the touch controller in reset. The remainder is regulator and charge
+   IC, which firmware cannot reach.
 3. ~~Move the GY-63 off-board on wires~~ — **done**, sensor now reads 27 C
    instead of 38 C. The static port still has to go there.
 4. **Jump it.** Flight build, zeroed at the DZ, logging on.

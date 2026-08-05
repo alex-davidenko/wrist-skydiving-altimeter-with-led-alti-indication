@@ -194,16 +194,28 @@
 // That leaves both controllers running through deep sleep: the AXS5106L is
 // self-clocked and keeps scanning the panel with nothing listening, typically
 // 1-3 mA for that class of part, and the JD9853's logic stays awake too.
-// Measured floor before this existed: 1.2 mA, of which the MS5611 was 0.1 mA
-// and the SD card 0.05 mA — so most of it was unattributed, and these two were
-// the only suspects reachable from software.
+// Measured on hardware, deep sleep, meter in series with the cell:
 //
-// Set independently to attribute the draw: flash with both 0 for the baseline,
-// then one at a time. Driving a reset low does cost current back through any
-// pull-up on the line (10k would be 0.33 mA), so a small improvement here means
-// the controller's own sleep command is the better fix, not the reset pin.
+//   no holds          1200 uA, and visibly jittering 1150-1250
+//   touch + LCD        950 uA
+//   touch only         765 uA   <- shipped
+//
+// Touch is worth 435 uA, and the jitter that vanished with it was the AXS5106L's
+// scan cycle. Waveshare's own driver has no power management for that part at
+// all, so the reset line is the only lever without the datasheet.
+//
+// The LCD hold measured 185 uA WORSE than leaving it alone. display::sleep()
+// already sends 0x28 and 0x10, so the JD9853 was properly asleep before its
+// reset was ever touched: the hold added nothing and drew current through the
+// pull-up on that line for the privilege. Kept as a flag rather than deleted so
+// the measurement is not lost and nobody re-enables it on the theory that more
+// reset must be better.
+//
+// For scale, the rest of the floor: MS5611 0.1 mA (measured by unsoldering it),
+// SD card 0.05 mA. The remaining ~765 uA is regulator quiescent, the charge IC,
+// and whatever the AXS5106L still draws held in reset — none of it reachable.
 #define DEEPSLEEP_HOLD_TOUCH_RST 1
-#define DEEPSLEEP_HOLD_LCD_RST   1
+#define DEEPSLEEP_HOLD_LCD_RST   0
 
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
