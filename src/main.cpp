@@ -71,6 +71,11 @@ static const char *g_resetReason = "?";
 static uint32_t g_autoOffWarnMs = 0;
 static uint32_t g_activeSinceMs = 0;    // last time we were NOT idle
 static uint32_t g_wakeShowUntil = 0;    // button wake keeps the screen up
+// The press that wakes the device from light sleep is still physically down
+// when the loop resumes, so pollButton would see it as a fresh press: opening
+// the menu and restarting the 60 s quiet timer, which overrode the 20 s wake
+// window entirely. Swallow that one release.
+static bool     g_btnSwallow    = false;
 #if !BENCH_MODE
 // Latched once a climb passes AIRCRAFT_LATCH_ALT_M. Without it, levelling off
 // on jump run drops vertical speed below the climb threshold, the phase machine
@@ -393,6 +398,9 @@ static void idleSleep()
   {
     display::wake();
     g_wakeShowUntil = millis() + IDLE_WAKE_DISPLAY_MS;
+    // Only if the finger is still on it — otherwise we would swallow the user's
+    // next genuine press instead.
+    g_btnSwallow = (digitalRead(PIN_BUTTON) == (BUTTON_ACTIVE_LOW ? LOW : HIGH));
     // Deliberately NOT touching g_activeSinceMs. Sleep needs both the wake
     // window to expire AND the quiet timer to be satisfied, so resetting the
     // quiet timer here made the effective wake max(20 s, 60 s) = 60 s and the
@@ -543,6 +551,12 @@ static void pollButton(uint32_t nowMs)
   // without the short action firing on the way to the long one.
   if (!down && wasDown)
   {
+    if (g_btnSwallow)          // this is the press that woke us; it is spent
+    {
+      g_btnSwallow = false;
+      wasDown = down;
+      return;
+    }
     const uint32_t held = nowMs - downAt;
     if (held >= ZERO_BUTTON_HOLD_MS)
     {
