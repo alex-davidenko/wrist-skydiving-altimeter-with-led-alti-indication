@@ -198,6 +198,12 @@
 #define BATTERY_PERIOD_MS  1000   // it does not move fast
 // The ADC is noisy sample to sample; smooth it so the readout is not twitchy.
 #define BATTERY_EMA        0.2f
+// Decimals shown on screen. 3 drops the "V" to keep the same 5-character width,
+// and exists because a true battery reading can only be taken with USB
+// unplugged — where the console is unavailable, so the screen is the only
+// instrument. Set back to 2 (which restores the "V") once the power figures are
+// settled.
+#define BATTERY_SCREEN_DECIMALS  3
 
 // ---- microSD (SDMMC, 4-bit) ----------------------------------------------
 // Cards must be FAT32 with an MBR partition scheme. ESP-IDF returns

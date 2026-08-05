@@ -612,11 +612,21 @@ void renderFrame(const Shared &st)
 
   // Battery, top-right opposite the speed. Quantised to 10 mV so ADC jitter
   // does not repaint it constantly.
+  // Quantise to the precision actually shown, so it repaints only when the
+  // displayed text changes.
+#if BATTERY_SCREEN_DECIMALS >= 3
+  const int32_t bv = (int32_t)lrintf(st.battV * 1000.0f);
+#else
   const int32_t bv = (int32_t)lrintf(st.battV * 100.0f);
+#endif
   if (bv != g_lastBatt)
   {
     char bbuf[12];
+#if BATTERY_SCREEN_DECIMALS >= 3
+    snprintf(bbuf, sizeof(bbuf), "%.3f", bv / 1000.0f);   // no "V": same width
+#else
     snprintf(bbuf, sizeof(bbuf), "%.2fV", bv / 100.0f);
+#endif
     g_gfx->setFont(NULL);
     g_gfx->setTextColor(ink, bg);
     g_gfx->setTextSize(2, 2, 0);
