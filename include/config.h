@@ -165,7 +165,15 @@
 #define IDLE_MAX_ALT_M           25.0f    // above this, never sleep
 #define IDLE_MAX_VSPEED_MPS      0.5f
 #define IDLE_QUIET_BEFORE_MS     60000    // must be idle this long before first sleep
-#define IDLE_WAKE_DISPLAY_MS     20000    // a button wake shows the screen this long
+#define IDLE_WAKE_DISPLAY_MS     20000
+// TEMPORARY DEBUG. Normally a connected host blocks sleep so the panel does not
+// go dark mid-session — but that also makes the behaviour unobservable over
+// USB, which is the only log we have. With this set, sleep proceeds while
+// plugged in: the CDC port drops when it sleeps and re-enumerates on wake,
+// which is itself the signal. Set back to 0 when done.
+#define IDLE_SLEEP_IGNORE_USB    1
+// Print, once a second, which condition is holding the device awake.
+#define IDLE_TRACE               1    // a button wake shows the screen this long
 
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.

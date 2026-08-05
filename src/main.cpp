@@ -310,7 +310,9 @@ static void clearZero()
 static bool mayIdleSleep(uint32_t nowMs)
 {
   if (!g_calibrated) return false;                    // nothing to compare against
+#if !IDLE_SLEEP_IGNORE_USB
   if (Serial) return false;                           // a host is attached: stay up
+#endif
   if (demo::active()) return false;
   if (display::screen() != display::UI_ALT) return false;
   if (static_cast<int32_t>(nowMs - g_wakeShowUntil) < 0) return false;
@@ -324,6 +326,42 @@ static bool mayIdleSleep(uint32_t nowMs)
 
   return static_cast<uint32_t>(nowMs - g_activeSinceMs) > IDLE_QUIET_BEFORE_MS;
 }
+
+#if IDLE_TRACE
+// Which single condition is holding us awake. Speculating about this from the
+// source went wrong twice; the device is a better witness than I am.
+static const char *idleBlockReason(uint32_t nowMs)
+{
+  if (!g_calibrated) return "not calibrated";
+#if !IDLE_SLEEP_IGNORE_USB
+  if (Serial) return "USB host attached";
+#endif
+  if (demo::active()) return "demo running";
+  if (display::screen() != display::UI_ALT) return "menu/banner on screen";
+  if (static_cast<int32_t>(nowMs - g_wakeShowUntil) < 0) return "wake window";
+  if (g_failStreak) return "sensor fail streak";
+  if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M) return "altitude > 25 m";
+  if (fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS) return "moving";
+#if AUTOZERO_ENABLED
+  if (g_groundRef.inFlight()) return "in-flight latch";
+#endif
+  if (static_cast<uint32_t>(nowMs - g_activeSinceMs) <= IDLE_QUIET_BEFORE_MS)
+    return "quiet timer";
+  return nullptr;
+}
+
+static void idleTrace(uint32_t nowMs)
+{
+  static uint32_t last = 0;
+  if (static_cast<uint32_t>(nowMs - last) < 1000) return;
+  last = nowMs;
+  const char *why = idleBlockReason(nowMs);
+  if (!why) return;
+  Serial.printf("idle: awake — %s (wake window %+ld ms, quiet %lu ms)\n", why,
+                (long)(int32_t)(g_wakeShowUntil - nowMs),
+                (unsigned long)(nowMs - g_activeSinceMs));
+}
+#endif
 
 static void idleSleep()
 {
@@ -1047,6 +1085,9 @@ void loop()
     display::publish(pattern, g_filter.altitude(), g_filter.velocity());
 
 #if IDLE_SLEEP_ENABLED
+#if IDLE_TRACE
+  idleTrace(now);
+#endif
   if (mayIdleSleep(now)) idleSleep();
 #endif
 
