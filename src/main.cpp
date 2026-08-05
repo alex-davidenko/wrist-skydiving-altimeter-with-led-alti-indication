@@ -72,10 +72,15 @@ static uint32_t g_autoOffWarnMs = 0;
 static uint32_t g_activeSinceMs = 0;    // last time we were NOT idle
 static uint32_t g_wakeShowUntil = 0;    // button wake keeps the screen up
 // The press that wakes the device from light sleep is still physically down
-// when the loop resumes, so pollButton would see it as a fresh press: opening
-// the menu and restarting the 60 s quiet timer, which overrode the 20 s wake
-// window entirely. Swallow that one release.
-static bool     g_btnSwallow    = false;
+// when the loop resumes, so pollButton sees it as a fresh press: opening the
+// menu and restarting the 60 s quiet timer, which overrode the 20 s wake window
+// entirely. Traced: g_activeSinceMs was being set 1.1 s after each wake.
+//
+// This is a deadline rather than a pin read. The first attempt armed the
+// swallow from digitalRead() at wake time, which does not reflect the button
+// after an EXT0 light sleep — the pin is an RTC GPIO at that moment — so it
+// never armed and the release went through anyway.
+static uint32_t g_btnSwallowUntil = 0;
 #if !BENCH_MODE
 // Latched once a climb passes AIRCRAFT_LATCH_ALT_M. Without it, levelling off
 // on jump run drops vertical speed below the climb threshold, the phase machine
@@ -325,10 +330,12 @@ static bool mayIdleSleep(uint32_t nowMs)
 
   if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M) return false;
   if (fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS) return false;
-#if AUTOZERO_ENABLED
-  if (g_groundRef.inFlight()) return false;           // independent guard
-#endif
-
+  // The in-flight latch used to gate this too, and it was the 120 s hold seen on
+  // hardware: the trace showed the reason switch from "wake window" to
+  // "in-flight latch" the instant the 20 s window expired, then sit there for
+  // the latch's full clear time. It bought nothing. That latch exists to stop
+  // auto-zero running at altitude; sleep is already refused above 25 m and above
+  // 0.5 m/s, which covers the aircraft case directly and more strictly.
   return static_cast<uint32_t>(nowMs - g_activeSinceMs) > IDLE_QUIET_BEFORE_MS;
 }
 
@@ -347,9 +354,6 @@ static const char *idleBlockReason(uint32_t nowMs)
   if (g_failStreak) return "sensor fail streak";
   if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M) return "altitude > 25 m";
   if (fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS) return "moving";
-#if AUTOZERO_ENABLED
-  if (g_groundRef.inFlight()) return "in-flight latch";
-#endif
   if (static_cast<uint32_t>(nowMs - g_activeSinceMs) <= IDLE_QUIET_BEFORE_MS)
     return "quiet timer";
   return nullptr;
@@ -398,9 +402,7 @@ static void idleSleep()
   {
     display::wake();
     g_wakeShowUntil = millis() + IDLE_WAKE_DISPLAY_MS;
-    // Only if the finger is still on it — otherwise we would swallow the user's
-    // next genuine press instead.
-    g_btnSwallow = (digitalRead(PIN_BUTTON) == (BUTTON_ACTIVE_LOW ? LOW : HIGH));
+    g_btnSwallowUntil = millis() + BUTTON_WAKE_SWALLOW_MS;
     // Deliberately NOT touching g_activeSinceMs. Sleep needs both the wake
     // window to expire AND the quiet timer to be satisfied, so resetting the
     // quiet timer here made the effective wake max(20 s, 60 s) = 60 s and the
@@ -551,9 +553,9 @@ static void pollButton(uint32_t nowMs)
   // without the short action firing on the way to the long one.
   if (!down && wasDown)
   {
-    if (g_btnSwallow)          // this is the press that woke us; it is spent
+    if (static_cast<int32_t>(nowMs - g_btnSwallowUntil) < 0)
     {
-      g_btnSwallow = false;
+      g_btnSwallowUntil = 0;   // the wake press is spent; the next one counts
       wasDown = down;
       return;
     }

@@ -166,6 +166,10 @@
 #define IDLE_MAX_VSPEED_MPS      0.5f
 #define IDLE_QUIET_BEFORE_MS     60000    // must be idle this long before first sleep
 #define IDLE_WAKE_DISPLAY_MS     20000
+// How long after a button wake to ignore a button release. The press that woke
+// the device is still down when the loop resumes, and would otherwise register
+// as a fresh press.
+#define BUTTON_WAKE_SWALLOW_MS    3000
 // TEMPORARY DEBUG. Normally a connected host blocks sleep so the panel does not
 // go dark mid-session — but that also makes the behaviour unobservable over
 // USB, which is the only log we have. With this set, sleep proceeds while
