@@ -536,14 +536,17 @@ airflow error actually is (see §9).
 
 | | |
 |---|---|
-| raw sensor noise | 0.165-0.22 m RMS |
-| filtered noise | 0.037 m RMS, ~5x reduction |
+| raw sensor noise | 0.14-0.22 m RMS |
+| filtered noise, bench tuning | 0.037 m RMS, ~7x reduction |
+| filtered noise, flight tuning | 0.019 m RMS, ~7.5x reduction |
+| pressure quantisation | 1 Pa = 0.084 m |
 | zero repeatability | +/-0.021 m |
 | full-screen panel fill | 23.7 ms at 40 MHz SPI |
 | one digit blit | 2.6 ms |
 | current, panel active | ~70 mA (4.12 -> 3.90 V on a 21700 over 13 h) |
 | current, idle light sleep | **not yet measured** — the open question |
-| sensor temperature on-board | 38 C (28 C on the C3) |
+| sensor temperature, on-board | 38 C — the reason it was moved |
+| sensor temperature, on wires | **27 C** — thermal plume resolved |
 
 ### Immediate next steps
 
@@ -553,8 +556,8 @@ airflow error actually is (see §9).
    held awake if it never sleeps. It deliberately stays awake on USB.
 2. **Desolder the two PWR LEDs** once sleep is confirmed — they become the
    dominant draw.
-3. **Move the GY-63 off-board on wires** (see §9 on self-heating), which is
-   also where the static port has to go.
+3. ~~Move the GY-63 off-board on wires~~ — **done**, sensor now reads 27 C
+   instead of 38 C. The static port still has to go there.
 4. **Jump it.** Flight build, zeroed at the DZ, logging on.
 
 ### Still planned
