@@ -20,27 +20,27 @@ struct Leg
   const char *label;
 };
 
-// Starts on the climb so the UNBUCKLE reminder can be seen, then a 4200 m exit,
-// pilot chute at 1100, settled by ~800, five 5-second spirals at 15 m/s, and the
-// landing ladder from 300 m down.
+// A complete jump, in real time, with nothing compressed: ten seconds on the
+// ground, a 10 m/s climb to 3750 m, a minute holding on jump run, then exit,
+// freefall, deployment, canopy, five spirals and the landing ladder.
 //
-// The first climb leg runs at a real 5 m/s so the 500-600 m unbuckle band lasts
-// its true 20 seconds. The rest of the climb is compressed: fourteen minutes of
-// an unchanging blue screen demonstrates nothing.
+// It runs about eleven minutes. That is the point — every phase is shown at the
+// rate it actually happens, so what you see here is what the screen will do in
+// the aircraft.
 const Leg kLegs[] = {
-    {50.0f,   5.0f,   5.0f, "CLIMB"},     // 400 -> 650 m, through the band
-    {120.0f, 30.0f,  30.0f, "CLIMB"},     // compressed, -> ~4250 m
-    { 5.0f,   0.0f,   0.0f, "JUMP RUN"},  // levelled off: the latch matters here
-    { 8.0f,   0.0f, -50.0f, "EXIT"},      // accelerating to terminal, -200 m
-    {58.0f, -50.0f, -50.0f, "FREEFALL"},  // -2900 m  -> 1100 m
-    { 4.0f, -50.0f,  -5.0f, "DEPLOY"},    // -110 m   -> ~990 m
-    {38.0f,  -5.0f,  -5.0f, "CANOPY"},    // -190 m   -> 800 m
-    {25.0f, -15.0f, -15.0f, "SPIRALS"},   // 5 x 5 s  -> 425 m
-    {25.0f,  -5.0f,  -5.0f, "CANOPY"},    // -125 m   -> 300 m
-    {70.0f,  -5.0f,  -5.0f, "LANDING"},   // -350 m   -> 0 m
+    { 10.0f,   0.0f,   0.0f, "GROUND"},   //    0 m, screen dark
+    {375.0f,  10.0f,  10.0f, "CLIMB"},    //    0 -> 3750 m at 10 m/s
+    { 60.0f,   0.0f,   0.0f, "JUMP RUN"}, // holding: the aircraft latch matters
+    {  8.0f,   0.0f, -50.0f, "EXIT"},     // 3750 -> 3550 m
+    { 49.0f, -50.0f, -50.0f, "FREEFALL"}, // 3550 -> 1100 m
+    {  4.0f, -50.0f,  -5.0f, "DEPLOY"},   // 1100 ->  990 m
+    { 38.0f,  -5.0f,  -5.0f, "CANOPY"},   //  990 ->  800 m
+    { 25.0f, -15.0f, -15.0f, "SPIRALS"},  // 5 x 5 s at 15 m/s -> 425 m
+    { 25.0f,  -5.0f,  -5.0f, "CANOPY"},   //  425 ->  300 m
+    { 60.0f,  -5.0f,  -5.0f, "LANDING"},  //  300 ->    0 m
 };
 constexpr int kLegCount = sizeof(kLegs) / sizeof(kLegs[0]);
-constexpr float kStartAlt = 400.0f;
+constexpr float kStartAlt = 0.0f;
 
 bool     g_active   = false;
 uint32_t g_startMs  = 0;
