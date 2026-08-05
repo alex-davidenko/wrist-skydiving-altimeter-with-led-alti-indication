@@ -76,6 +76,12 @@ Shared g_shared;
 uint8_t g_lastScreen = 0xFF;
 volatile bool g_suspended = false;
 
+// Backlight state, cached so the task does not write the GPIO every tick.
+// It lives here rather than inside the task because sleep() and wake() also
+// drive the pin: a copy local to the task went stale across a light sleep, and
+// the backlight stayed off after waking while the panel was drawn to normally.
+bool g_blOn = true;
+
 // Button rectangles. hitTest() and the renderer both read these, so a button
 // can never be drawn somewhere other than where it responds.
 struct Rect { int16_t x, y, w, h; };
@@ -631,7 +637,6 @@ bool backlightPhase(const Shared &st, uint32_t nowMs)
 
 void displayTask(void *)
 {
-  bool     lastBl   = true;
   uint32_t lastDraw = 0;
 
   for (;;)
@@ -647,10 +652,10 @@ void displayTask(void *)
 
     // Backlight every tick, so blink edges land within DISPLAY_TICK_MS.
     const bool bl = backlightPhase(st, now);
-    if (bl != lastBl)
+    if (bl != g_blOn)
     {
       digitalWrite(PIN_LCD_BL, bl ? HIGH : LOW);
-      lastBl = bl;
+      g_blOn = bl;
     }
 
     // Pixels far less often, and only when something actually changed.
@@ -772,6 +777,7 @@ void sleep()
   g_suspended = true;
   delay(80);                                   // let any in-flight draw finish
   digitalWrite(PIN_LCD_BL, LOW);
+  g_blOn = false;
   const uint8_t off[] = {BEGIN_WRITE, WRITE_COMMAND_8, 0x28,   // display off
                          WRITE_COMMAND_8, 0x10,                // sleep in
                          END_WRITE};
@@ -797,6 +803,14 @@ void wake()
   g_lastBatt    = INT32_MIN;
   g_lastAltFont = nullptr;
   g_lastStr[0]  = '\0';
+  g_lastTop[0]  = 1; g_lastTop[1] = 0;
+  g_lastUnit    = 0xFF;
+
+  // Re-assert the backlight. Without this the panel comes back but stays unlit:
+  // the task only writes the pin on a change, and its idea of the current state
+  // would still say "on" from before the sleep.
+  digitalWrite(PIN_LCD_BL, HIGH);
+  g_blOn        = true;
   g_suspended   = false;
 }
 
