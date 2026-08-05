@@ -785,6 +785,51 @@ static void test_inflight_latch_blocks_and_clears()
   TEST_ASSERT_FALSE_MESSAGE(g.inFlight(), "latch never cleared");
 }
 
+// A step offset must converge smoothly, not in chunks. Applying a correction
+// moves the reported altitude; if the tracker mistakes that for the device being
+// picked up it restarts its own settle timer, and a 2 m offset then corrects one
+// band at a time with a full settle wait between each — ten minutes with a
+// four-minute stall in the middle, which reads as a hang.
+static void test_step_offset_converges_without_stalling()
+{
+  GroundRef g;
+  g.begin(kGref);
+  uint32_t clock = 0;
+  g.reset(clock);
+
+  float alt = -2.0f;                       // zeroed 2 m up, then set down
+  uint32_t startedMs = 0, doneMs = 0;
+  uint32_t longestPause = 0, lastCorrMs = 0;
+
+  for (int i = 0; i < 4800; i++)           // 40 minutes at 0.5 s steps
+  {
+    clock += 500;
+    const float c = g.update(alt, 0.0f, clock);
+    alt -= c;
+
+    if (c != 0.0f)
+    {
+      if (!startedMs) { startedMs = clock; lastCorrMs = clock; }
+      const uint32_t gap = clock - lastCorrMs;
+      if (startedMs && gap > longestPause) longestPause = gap;
+      lastCorrMs = clock;
+    }
+    if (startedMs && !doneMs && std::fabs(alt) < 0.05f) { doneMs = clock; break; }
+  }
+
+  TEST_ASSERT_TRUE_MESSAGE(startedMs > 0, "never started correcting");
+  TEST_ASSERT_TRUE_MESSAGE(doneMs > 0, "never converged");
+
+  // 2 m at 0.5 m/min is 4 minutes of slewing. Allow a little slack, but nothing
+  // like the extra settle wait a restart would cost.
+  const uint32_t slewMs = doneMs - startedMs;
+  TEST_ASSERT_TRUE_MESSAGE(slewMs < 5u * 60000u,
+                           "convergence took far longer than the slew rate implies");
+  // No pause anywhere near a settle period.
+  TEST_ASSERT_TRUE_MESSAGE(longestPause < 30000u,
+                           "stalled mid-correction — the settle timer restarted");
+}
+
 // The sandwich case: a few metres up for a few minutes, then back down. The
 // point of slewing is that this costs a small error, not a wrong zero.
 static void test_short_excursion_costs_little()
@@ -840,6 +885,7 @@ int main(int, char **)
   RUN_TEST(test_autozero_corrects_ground_drift);
   RUN_TEST(test_autozero_never_fires_at_altitude);
   RUN_TEST(test_inflight_latch_blocks_and_clears);
+  RUN_TEST(test_step_offset_converges_without_stalling);
   RUN_TEST(test_short_excursion_costs_little);
 
   return UNITY_END();

@@ -75,5 +75,16 @@ float GroundRef::update(float aglM, float vspeedMps, uint32_t nowMs)
 
   float step = _cfg.slewMPerMin * dtMin;
   if (step > std::fabs(aglM)) step = std::fabs(aglM);   // never overshoot zero
-  return (aglM >= 0.0f) ? step : -step;
+  const float correction = (aglM >= 0.0f) ? step : -step;
+
+  // Follow our own output. Applying a correction moves the reported altitude,
+  // and without this the settle band sees that movement, concludes the device
+  // was picked up, and restarts the timer — so a large offset was corrected in
+  // one-band chunks separated by full settle waits. A 2 m step took ten minutes
+  // with a four-minute stall in the middle, which looks indistinguishable from
+  // a hang. Real drift never triggered it (0.03 m/min against a 1 m band), but
+  // any step change did.
+  _settleAlt -= correction;
+
+  return correction;
 }
