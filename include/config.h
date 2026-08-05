@@ -113,6 +113,36 @@
 // Horizontal travel needed to count as a swipe rather than a tap.
 #define TOUCH_SWIPE_MIN_PX   60
 
+// ---- Automatic ground-reference correction (weather drift) ---------------
+// Mirrors what production kit does: CYPRES re-measures ground pressure twice a
+// minute, the Vigil recalibrates every two minutes "progressively". Leaving the
+// reference fixed is the actual error — uncorrected drift is tens of metres
+// over a jumping day.
+//
+// The settle time scales with altitude, per Alti-2's published behaviour
+// (~10 min at 500 ft, "several hours" at 12,000 ft), which is what makes an
+// aircraft holding at altitude safe: 4 min at 25 m, but 3.3 hours at 4000 m.
+#define AUTOZERO_ENABLED         1
+#define AUTOZERO_SETTLED_MPS     0.5f
+// 1 m band, so a walk upstairs restarts the timer rather than being absorbed.
+#define AUTOZERO_BAND_M          1.0f
+#define AUTOZERO_BASE_MIN        3.0f
+#define AUTOZERO_PER_M_MIN       0.05f
+// 0.5 m/min is 17x faster than real drift needs (~0.03 m/min), and slow enough
+// that a five-minute excursion moves the reference under a metre.
+#define AUTOZERO_SLEW_M_PER_MIN  0.5f
+// Independent guard: any sustained motion latches "in flight" and disables
+// correction until the device is back low and still.
+#define AUTOZERO_LATCH_VS_MPS    1.0f
+#define AUTOZERO_LATCH_ALT_M     150.0f
+#define AUTOZERO_LATCH_CLEAR_MS  120000
+
+// ---- Automatic power off --------------------------------------------------
+// Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
+// This is for "I left it in my gear bag". Deferred while moving, and warned.
+#define AUTO_OFF_HOURS           16
+#define AUTO_OFF_WARN_MS         30000
+
 // ---- Battery sense --------------------------------------------------------
 // GPIO12 through a 3:1 divider, per Waveshare's own battery example.
 // analogReadMilliVolts() is factory-calibrated, so the only scaling needed is

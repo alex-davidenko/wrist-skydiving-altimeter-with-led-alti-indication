@@ -27,6 +27,7 @@
 #include "demo.h"
 #include "display.h"
 #include "flight_mode.h"
+#include "ground_ref.h"
 #include "led.h"
 #include "logger.h"
 #include "touch.h"
@@ -43,6 +44,9 @@ static ZoneTracker   g_zones;      // freefall colour ladder
 static ZoneTracker        g_landing; // landing ladder, used under canopy
 static FlightModeTracker  g_modes;
 static ClimbMarker        g_climb;
+#endif
+#if AUTOZERO_ENABLED
+static GroundRef     g_groundRef;
 #endif
 static Preferences   g_prefs;
 
@@ -64,6 +68,7 @@ static bool     g_touchDump    = false;
 static float    g_battV        = 0.0f;
 static uint32_t g_nextBattMs   = 0;
 static const char *g_resetReason = "?";
+static uint32_t g_autoOffWarnMs = 0;
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -250,6 +255,9 @@ static bool zeroHere()
 
   g_filter.reset(0.0f);
   g_zones.reset(0.0f);
+#if AUTOZERO_ENABLED
+  g_groundRef.reset(millis());     // a manual zero supersedes any drift progress
+#endif
 #if !BENCH_MODE
   g_landing.reset(0.0f);
   g_modes.reset(MODE_CANOPY);
@@ -405,6 +413,7 @@ static void pollButton(uint32_t nowMs)
     }
     else if (held >= 30)          // debounce
     {
+      g_autoOffWarnMs = 0;                        // interaction cancels auto-off
       if (demo::active())                            demo::stop();
       else if (display::screen() == display::UI_ALT) openMenu();
       else                                           closeMenu();
@@ -455,6 +464,14 @@ static void printStatus()
   Serial.printf("LED brightness: %u\n", led::brightness());
   Serial.printf("battery       : %.2f V\n", g_battV);
   Serial.printf("reset reason  : %s\n", g_resetReason);
+  Serial.printf("uptime        : %.1f h of %d h before auto-off\n",
+                millis() / 3600000.0, AUTO_OFF_HOURS);
+#if AUTOZERO_ENABLED
+  Serial.printf("auto-zero     : %s%s (needs %.1f min settled at this altitude)\n",
+                g_groundRef.inFlight() ? "LOCKED OUT (in flight)" : "armed",
+                g_groundRef.correcting() ? ", correcting now" : "",
+                g_groundRef.requiredSettleMs(g_filter.altitude()) / 60000.0);
+#endif
   {
     const time_t now = time(nullptr);
     char ts[32];
@@ -682,6 +699,12 @@ void setup()
   loadCalibration();
 
   g_filter.configureAdaptive(FILTER_GATE_SIGMA, FILTER_MAX_INFLATE);
+#if AUTOZERO_ENABLED
+  g_groundRef.begin({AUTOZERO_SETTLED_MPS, AUTOZERO_BAND_M, AUTOZERO_BASE_MIN,
+                     AUTOZERO_PER_M_MIN, AUTOZERO_SLEW_M_PER_MIN,
+                     AUTOZERO_LATCH_VS_MPS, AUTOZERO_LATCH_ALT_M,
+                     AUTOZERO_LATCH_CLEAR_MS});
+#endif
   g_zones.begin(kZoneConfig);
 #if !BENCH_MODE
   g_landing.begin(kLandingConfig);
@@ -778,6 +801,7 @@ void loop()
                                                      : "SWIPE>",
                       rx, ry, e.x, e.y);
       }
+      g_autoOffWarnMs = 0;                        // interaction cancels auto-off
       if (demo::active())                          demo::stop();
       else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
@@ -790,6 +814,28 @@ void loop()
     // EMA: a single ADC sample jitters by tens of millivolts.
     g_battV = (g_battV <= 0.0f) ? v : g_battV + BATTERY_EMA * (v - g_battV);
     display::setBattery(g_battV);
+  }
+
+  // Auto power-off. Hygiene, not a power measure — but it must never fire
+  // mid-jump, so it defers while moving and warns before acting.
+  if (now > (uint32_t)AUTO_OFF_HOURS * 3600000UL)
+  {
+    if (fabsf(g_filter.velocity()) > SLEEP_MAX_VSPEED_MPS)
+    {
+      g_autoOffWarnMs = 0;                       // moving: defer, no warning
+    }
+    else if (g_autoOffWarnMs == 0)
+    {
+      g_autoOffWarnMs = now;
+      display::setBanner("AUTO OFF", "touch to cancel");
+      Serial.printf("Auto power-off in %lu s — touch or press BOOT to cancel.\n",
+                    (unsigned long)(AUTO_OFF_WARN_MS / 1000));
+    }
+    else if (static_cast<uint32_t>(now - g_autoOffWarnMs) > AUTO_OFF_WARN_MS)
+    {
+      Serial.println(F("Auto power-off."));
+      powerOff();
+    }
   }
 
   // Never leave a menu covering the altitude in the air.
@@ -836,6 +882,22 @@ void loop()
     {
       g_failStreak++;
     }
+
+#if AUTOZERO_ENABLED
+    // Weather-drift correction. Returns metres to add to the ground reference,
+    // almost always zero; see lib/altimeter_core/ground_ref.h for why the
+    // settle time scales with altitude and why the in-flight latch exists.
+    if (g_calibrated)
+    {
+      const float corr =
+          g_groundRef.update(g_filter.altitude(), g_filter.velocity(), now);
+      if (corr != 0.0f)
+      {
+        const float ga = baro::pressureAltitude(g_groundPHpa, g_qnhHpa) + corr;
+        g_groundPHpa = baro::pressureAtAltitude(ga, g_qnhHpa);
+      }
+    }
+#endif
 
 #if BENCH_MODE
     const uint8_t phase = 0;

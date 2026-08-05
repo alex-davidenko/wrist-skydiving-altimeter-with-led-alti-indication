@@ -21,6 +21,11 @@ constexpr float kISASeaLevel_hPa = 1013.25f;
 // what matters, not the absolute number.
 float pressureAltitude(float pressure_hPa, float seaLevel_hPa = kISASeaLevel_hPa);
 
+// Pressure you would measure at `altitude_m` under a given sea-level
+// reference. The inverse of pressureAltitude(), used to move the stored ground
+// reference by a number of metres.
+float pressureAtAltitude(float altitude_m, float seaLevel_hPa = kISASeaLevel_hPa);
+
 // Inverse: what sea-level pressure would put `pressure_hPa` at `altitude_m`.
 // Useful if you know the DZ elevation and want a real QNH rather than a
 // zeroed AGL reference.

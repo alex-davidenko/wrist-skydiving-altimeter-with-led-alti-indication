@@ -14,6 +14,7 @@
 #include "altitude_filter.h"
 #include "baro_math.h"
 #include "flight_mode.h"
+#include "ground_ref.h"
 #include "zones.h"
 
 // Deterministic pseudo-noise so failures are reproducible.
@@ -673,6 +674,135 @@ static void test_full_jump_profile()
   TEST_ASSERT_EQUAL_MESSAGE(LAND_DARK_LOW, at5,   "below 10 m assistance should stop");
 }
 
+
+// ---------------------------------------------------------------------------
+//  Ground-reference auto-correction (weather drift)
+// ---------------------------------------------------------------------------
+static const GroundRefConfig kGref = {
+    0.5f,      // settled below 0.5 m/s
+    1.0f,      // must hold within 1 m — a 3 m walk upstairs restarts the timer
+    3.0f,      // base minutes
+    0.05f,     // per-metre minutes
+    0.5f,      // slew m/min: 17x faster than real drift needs, and slow enough
+               // that a 5-minute excursion moves the reference under a metre
+    1.0f,      // sustained 1 m/s sets the in-flight latch
+    150.0f,    // clear below 150 m
+    120000     // after 2 min stationary
+};
+
+// Drive the tracker for `secs` at a fixed altitude and speed, applying the
+// corrections it asks for. Returns the total correction applied.
+static float runGref(GroundRef &g, float alt, float vs, float secs,
+                     uint32_t *clock, bool moveAltWithCorrection = true)
+{
+  float applied = 0.0f;
+  for (float t = 0; t < secs; t += 0.5f)
+  {
+    *clock += 500;
+    const float c = g.update(alt, vs, *clock);
+    applied += c;
+    if (moveAltWithCorrection) alt -= c;   // correcting the reference lowers AGL
+  }
+  return applied;
+}
+
+static void test_autozero_timeout_scales_with_altitude()
+{
+  GroundRef g;
+  g.begin(kGref);
+  // 3 + 0.05*alt minutes, per Alti-2's published behaviour.
+  TEST_ASSERT_UINT32_WITHIN(2000,  (uint32_t)(3.0 * 60000), g.requiredSettleMs(0.0f));
+  TEST_ASSERT_UINT32_WITHIN(2000,  (uint32_t)(4.25 * 60000), g.requiredSettleMs(25.0f));
+  TEST_ASSERT_UINT32_WITHIN(5000,  (uint32_t)(10.6 * 60000), g.requiredSettleMs(152.0f));
+  // 4000 m must be hours, not minutes — this is the aircraft-hold guard.
+  TEST_ASSERT_TRUE(g.requiredSettleMs(4000.0f) > (uint32_t)(3.0 * 3600000));
+}
+
+// Sitting on the ground with a couple of metres of drift: correct it, slowly.
+static void test_autozero_corrects_ground_drift()
+{
+  GroundRef g;
+  g.begin(kGref);
+  uint32_t clock = 0;
+  g.reset(clock);
+
+  // Nothing for the first few minutes.
+  float applied = runGref(g, 2.0f, 0.0f, 150.0f, &clock, false);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, applied);
+  TEST_ASSERT_FALSE(g.correcting());
+
+  // Past the ~3 min threshold it starts. Feed the correction back into the
+  // altitude, as the real device does, so it can actually converge.
+  float alt = 2.0f;
+  for (int i = 0; i < 2400; i++)          // 20 minutes at 0.5 s steps
+  {
+    clock += 500;
+    const float c = g.update(alt, 0.0f, clock);
+    alt -= c;
+    applied += c;
+  }
+  TEST_ASSERT_TRUE_MESSAGE(g.correcting(), "should be correcting by now");
+  TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.05f, 0.0f, alt,
+                                   "drift should have been pulled out to zero");
+  TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.05f, 2.0f, applied,
+                                   "total correction should equal the drift");
+}
+
+// THE hazard: an aircraft holding at altitude must never be re-zeroed.
+static void test_autozero_never_fires_at_altitude()
+{
+  GroundRef g;
+  g.begin(kGref);
+  uint32_t clock = 0;
+  g.reset(clock);
+
+  // Climb to 4000 m, then hold dead still for a full hour.
+  runGref(g, 2000.0f, 5.0f, 400.0f, &clock, false);        // climbing
+  const float applied = runGref(g, 4000.0f, 0.0f, 3600.0f, &clock, false);
+
+  TEST_ASSERT_EQUAL_FLOAT_MESSAGE(0.0f, applied,
+      "re-zeroed while holding at altitude — this is the dangerous case");
+  TEST_ASSERT_TRUE_MESSAGE(g.inFlight(), "in-flight latch should still be set");
+}
+
+// The latch alone must block correction even if the timeout somehow elapsed.
+static void test_inflight_latch_blocks_and_clears()
+{
+  GroundRef g;
+  g.begin(kGref);
+  uint32_t clock = 0;
+  g.reset(clock);
+
+  runGref(g, 100.0f, 5.0f, 60.0f, &clock, false);       // moving -> latched
+  TEST_ASSERT_TRUE(g.inFlight());
+
+  // Back on the ground but not yet for long enough.
+  runGref(g, 1.0f, 0.0f, 60.0f, &clock, false);
+  TEST_ASSERT_TRUE_MESSAGE(g.inFlight(), "latch cleared too eagerly");
+
+  // After the full clear time it releases.
+  runGref(g, 1.0f, 0.0f, 120.0f, &clock, false);
+  TEST_ASSERT_FALSE_MESSAGE(g.inFlight(), "latch never cleared");
+}
+
+// The sandwich case: a few metres up for a few minutes, then back down. The
+// point of slewing is that this costs a small error, not a wrong zero.
+static void test_short_excursion_costs_little()
+{
+  GroundRef g;
+  g.begin(kGref);
+  uint32_t clock = 0;
+  g.reset(clock);
+
+  runGref(g, 0.0f, 0.0f, 900.0f, &clock, false);        // settled at home
+  // Walk up 3 m and linger 5 minutes. The 1 m settle band restarts the timer,
+  // so ~3.15 min passes before any correction, and the slow slew then moves the
+  // reference under a metre before you come back down.
+  const float up = runGref(g, 3.0f, 0.0f, 300.0f, &clock, false);
+  TEST_ASSERT_TRUE_MESSAGE(up < 1.5f,
+      "a five-minute excursion should not meaningfully move the reference");
+}
+
 // ---------------------------------------------------------------------------
 int main(int, char **)
 {
@@ -705,6 +835,12 @@ int main(int, char **)
   RUN_TEST(test_high_speed_malfunction_keeps_freefall_warnings);
   RUN_TEST(test_climb_marker_fires_every_100m);
   RUN_TEST(test_full_jump_profile);
+
+  RUN_TEST(test_autozero_timeout_scales_with_altitude);
+  RUN_TEST(test_autozero_corrects_ground_drift);
+  RUN_TEST(test_autozero_never_fires_at_altitude);
+  RUN_TEST(test_inflight_latch_blocks_and_clears);
+  RUN_TEST(test_short_excursion_costs_little);
 
   return UNITY_END();
 }
