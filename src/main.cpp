@@ -14,6 +14,7 @@
 #include <Preferences.h>
 #include <Wire.h>
 
+#include <driver/gpio.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <sys/time.h>
@@ -469,6 +470,27 @@ static void unmountCard()
 // "Power off" is deep sleep, not a true power cut: without a hardware latch the
 // ESP32 cannot disconnect its own supply. Panel asleep, card unmounted, wake on
 // the BOOT button or RST.
+// Hold the touch and panel controllers in reset for the duration of deep sleep,
+// so they stop drawing. GPIO40 and GPIO47 are outside the RTC bank (GPIO0-21),
+// so rtc_gpio_hold does not apply to them — the digital-pad hold is what
+// latches a level once the CPU is off. See config.h for the measurements.
+static void holdPeripheralsForDeepSleep()
+{
+#if DEEPSLEEP_HOLD_TOUCH_RST
+  pinMode(PIN_TOUCH_RST, OUTPUT);
+  digitalWrite(PIN_TOUCH_RST, LOW);
+  gpio_hold_en(static_cast<gpio_num_t>(PIN_TOUCH_RST));
+#endif
+#if DEEPSLEEP_HOLD_LCD_RST
+  pinMode(PIN_LCD_RST, OUTPUT);
+  digitalWrite(PIN_LCD_RST, LOW);
+  gpio_hold_en(static_cast<gpio_num_t>(PIN_LCD_RST));
+#endif
+#if DEEPSLEEP_HOLD_TOUCH_RST || DEEPSLEEP_HOLD_LCD_RST
+  gpio_deep_sleep_hold_en();
+#endif
+}
+
 static void powerOff()
 {
   // Refuse while moving. Shutting down in freefall is the one failure mode
@@ -487,6 +509,8 @@ static void powerOff()
   display::setBanner("POWERING OFF", "BOOT/RST to wake");
   delay(1500);
   display::sleep();
+
+  holdPeripheralsForDeepSleep();
 
   esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(PIN_BUTTON), 0);
   esp_deep_sleep_start();
@@ -800,6 +824,14 @@ void setup()
   // consumes the request, so a crash in that mode cannot trap the device — any
   // reset comes back here and continues normally.
   if (usbmsc::bootRequested()) usbmsc::runForever();   // never returns
+
+  // A pad hold latched before deep sleep survives the wake, so release both
+  // reset lines before anything initialises a peripheral — otherwise the panel
+  // and touch controller stay in reset for the whole session. Unconditional:
+  // the previous boot may have been a build with the holds enabled.
+  gpio_hold_dis(static_cast<gpio_num_t>(PIN_TOUCH_RST));
+  gpio_hold_dis(static_cast<gpio_num_t>(PIN_LCD_RST));
+  gpio_deep_sleep_hold_dis();
 
   Serial.begin(115200);
   delay(300);

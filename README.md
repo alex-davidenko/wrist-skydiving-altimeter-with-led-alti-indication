@@ -592,8 +592,21 @@ the residue, that is the floor for this PCB, and getting under it means a board
 with a high-side load switch over everything outside the RTC domain plus an LDO
 with single-digit-uA quiescent.
 
-Test before writing any of it: in deep sleep, tie GPIO47 then GPIO40 to GND and
-watch the meter. The pins float, so there is no contention.
+Neither pin is broken out on the headers, so this is done in firmware rather
+than with a jumper: `DEEPSLEEP_HOLD_TOUCH_RST` and `DEEPSLEEP_HOLD_LCD_RST` in
+`config.h` drive each reset low before `esp_deep_sleep_start()` and latch it
+with the digital-pad hold. They are independent so the draw can be attributed —
+flash with both 0 for the baseline, then one at a time.
+
+The hold survives the wake, so `setup()` releases both before anything touches a
+peripheral; without that the panel and touch controller stay in reset for the
+whole session. That release is unconditional, since the previous boot may have
+been a build with the holds on.
+
+One caveat on interpreting the result: driving a reset low costs current back
+through any pull-up on the line — a 10k to 3V3 is 0.33 mA. So a *small*
+improvement does not exonerate the controller, it means the reset pin is the
+wrong lever and the part's own sleep command is the right one.
 
 ## 8. Where this is up to
 

@@ -189,6 +189,22 @@
 #define IDLE_SLEEP_IGNORE_USB    0
 #define IDLE_TRACE               0
 
+// ---- Deep sleep peripheral hold -------------------------------------------
+// PIN_TOUCH_RST and PIN_LCD_RST are driven by the S3 and float once it stops.
+// That leaves both controllers running through deep sleep: the AXS5106L is
+// self-clocked and keeps scanning the panel with nothing listening, typically
+// 1-3 mA for that class of part, and the JD9853's logic stays awake too.
+// Measured floor before this existed: 1.2 mA, of which the MS5611 was 0.1 mA
+// and the SD card 0.05 mA — so most of it was unattributed, and these two were
+// the only suspects reachable from software.
+//
+// Set independently to attribute the draw: flash with both 0 for the baseline,
+// then one at a time. Driving a reset low does cost current back through any
+// pull-up on the line (10k would be 0.33 mA), so a small improvement here means
+// the controller's own sleep command is the better fix, not the reset pin.
+#define DEEPSLEEP_HOLD_TOUCH_RST 1
+#define DEEPSLEEP_HOLD_LCD_RST   1
+
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
 // This is for "I left it in my gear bag". Deferred while moving, and warned.
