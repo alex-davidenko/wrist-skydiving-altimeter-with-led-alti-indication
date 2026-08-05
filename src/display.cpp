@@ -576,13 +576,14 @@ void renderFrame(const Shared &st)
   else
   {
     // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
-    // mph pairs with feet, m/s with metres — the conventional pairing.
-    const int32_t vs = st.feet ? (int32_t)lrintf(st.vsMps * MPS_TO_MPH)
+    // ft/s with feet, m/s with metres. Integer ft/s is 0.3 m/s of resolution,
+    // which is finer than anything the reading is used for.
+    const int32_t vs = st.feet ? (int32_t)lrintf(st.vsMps * METRES_TO_FEET)
                                : (int32_t)lrintf(st.vsMps * 10.0f);
     if (vs != g_lastVs)
     {
       char vbuf[20];
-      if (st.feet) snprintf(vbuf, sizeof(vbuf), "%+4ld mph", (long)vs);
+      if (st.feet) snprintf(vbuf, sizeof(vbuf), "%+4ld ft/s", (long)vs);
       else         snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
       g_gfx->setFont(NULL);
       g_gfx->setTextColor(ink, bg);
