@@ -572,15 +572,28 @@ sensor is 0.1 mA. A switched supply would recover that 0.1 mA and add a warm-up
 transient on every wake — the same transient documented in §6, which has already
 cost two bugs.
 
-**The 1.1 mA floor is the board, not the firmware.** An ESP32-S3 in deep sleep
-draws 10-20 uA, so essentially all of it is peripherals that stay powered:
-regulator quiescent, the charge IC, the panel controller, the touch controller
-and the SD card. Nothing in software reaches them. This is the floor for this
-PCB; getting below it means a board with a high-side load switch over everything
-outside the RTC domain and an LDO with single-digit-uA quiescent.
+**The 1.1 mA floor is peripherals, not the MCU.** An ESP32-S3 in deep sleep draws
+10-20 uA, so essentially all of it is parts that stay powered while the CPU is
+off. The SD card was measured and ruled out at **50 uA**. What remains splits in
+two, and the distinction is the difference between a firmware fix and a respin:
 
-Not yet tried: the JD9853's sleep-in command (`0x10`) before light sleep, which
-should take a bite out of the 2.7 mA idle figure.
+*Reachable from software.* `PIN_TOUCH_RST` (GPIO47) and `PIN_LCD_RST` (GPIO40)
+both float during deep sleep, which leaves those controllers running. The
+AXS5106L is self-clocked and keeps scanning the panel once the S3 stops talking
+to it — typically 1-3 mA for that class of part, so it is the prime suspect for
+most of the floor. Driving either reset low before sleeping and latching it with
+`gpio_hold_en()` + `gpio_deep_sleep_hold_en()` should hold them down; both pins
+are outside the RTC bank (GPIO0-21) so they need the digital-hold path, not RTC
+hold. The JD9853 also has a sleep-in command (`0x10`) if reset is too blunt.
+Nothing needs touch during deep sleep — wake is EXT0 on BOOT.
+
+*Not reachable.* Regulator quiescent and the charge IC. If those turn out to be
+the residue, that is the floor for this PCB, and getting under it means a board
+with a high-side load switch over everything outside the RTC domain plus an LDO
+with single-digit-uA quiescent.
+
+Test before writing any of it: in deep sleep, tie GPIO47 then GPIO40 to GND and
+watch the meter. The pins float, so there is no contention.
 
 ## 8. Where this is up to
 
@@ -619,8 +632,10 @@ airflow error actually is (see §9).
 
 1. ~~Measure idle sleep current~~ and ~~desolder the PWR LEDs~~ — **both done**,
    see the table above and §7b. Idle sleep is real: 110 mA -> 2.7 mA.
-2. **Pull the SD card and re-measure deep sleep.** The last untested suspect in
-   the 1.1 mA floor, and cards vary hugely in idle draw. Ten-second test.
+2. **Attribute the 1.1 mA deep-sleep floor.** SD card measured and ruled out at
+   50 uA. Next: in deep sleep, tie GPIO47 (touch RST) then GPIO40 (LCD RST) to
+   GND and watch the meter. See §7b — the touch controller keeps scanning on its
+   own once the S3 stops talking to it, and is the prime suspect.
 3. ~~Move the GY-63 off-board on wires~~ — **done**, sensor now reads 27 C
    instead of 38 C. The static port still has to go there.
 4. **Jump it.** Flight build, zeroed at the DZ, logging on.
