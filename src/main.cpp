@@ -355,7 +355,12 @@ static void idleSleep()
   {
     display::wake();
     g_wakeShowUntil = millis() + IDLE_WAKE_DISPLAY_MS;
-    g_activeSinceMs = millis();
+    // Deliberately NOT touching g_activeSinceMs. Sleep needs both the wake
+    // window to expire AND the quiet timer to be satisfied, so resetting the
+    // quiet timer here made the effective wake max(20 s, 60 s) = 60 s and the
+    // 20 s setting did nothing. A glance at the altitude should cost 20 s, not
+    // a minute; real interaction still restarts the quiet timer where it is
+    // handled, in pollButton and the touch path.
     Serial.println(F("idle: woken by button"));
   }
   else if (fabsf(g_rawAglM) > IDLE_MAX_ALT_M)
