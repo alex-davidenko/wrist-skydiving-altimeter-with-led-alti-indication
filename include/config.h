@@ -162,6 +162,17 @@
 #define AUTO_OFF_HOURS           16
 #define AUTO_OFF_WARN_MS         30000
 
+// ---- Display units --------------------------------------------------------
+// Conversion happens ONLY at render time. Everything internal — filter, zones,
+// thresholds, logs — stays in metres, so switching units cannot disturb any
+// tuning constant, any test, or the meaning of a log file.
+//
+// Feet are rounded to 10, which is what production altimeters do: at 50 m/s the
+// foot digit changes 164 times a second and is unreadable.
+#define UNITS_FEET_DEFAULT   0        // 0 = metres, 1 = feet
+#define METRES_TO_FEET       3.28084f
+#define MPS_TO_MPH           2.23694f
+
 // ---- Battery sense --------------------------------------------------------
 // GPIO12 through a 3:1 divider, per Waveshare's own battery example.
 // analogReadMilliVolts() is factory-calibrated, so the only scaling needed is

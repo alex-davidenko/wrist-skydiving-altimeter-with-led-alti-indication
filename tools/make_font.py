@@ -173,7 +173,9 @@ def main():
     # The band above the vertical-speed strip is 146px; cap glyphs at 118 to
     # stay clear of the int8 yOffset limit with margin.
     WIDTH, BAND = 320 - 8, 118
-    for name, digits in (("FontAltBig", 3), ("FontAltMed", 4)):
+    # Five digits are only needed above 10,000 ft. The sizing falls out nicely:
+    # the number gets BIGGER as you get lower, which is when it matters most.
+    for name, digits in (("FontAltBig", 3), ("FontAltMed", 4), ("FontAltSmall", 5)):
         cap = cap_that_fits(digits, WIDTH, BAND)
         body, adv, h = build(name, cap)
         print(body)

@@ -52,6 +52,7 @@ enum UiAction : uint8_t
   ACT_UNMOUNT,
   ACT_DEMO,
   ACT_USB,
+  ACT_UNITS,
   ACT_POWER,
   ACT_CANCEL,
   ACT_CONFIRM
@@ -94,6 +95,10 @@ void setBattery(float volts);
 // Text for the top strip, replacing the vertical-speed readout. Empty restores
 // the speed. Used for the UNBUCKLE reminder during the climb.
 void setTopText(const char *text);
+
+// Display units. Affects rendering only — nothing internal changes.
+void setUnitsFeet(bool feet);
+bool unitsFeet();
 
 // Microseconds taken by the last full-screen fill — the expensive operation,
 // worth reporting rather than guessing at.

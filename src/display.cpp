@@ -12,6 +12,8 @@ void startTask() {}
 void publish(const LedPattern &, float, float) {}
 void setBattery(float) {}
 void setTopText(const char *) {}
+void setUnitsFeet(bool) {}
+bool unitsFeet() { return false; }
 void setScreen(uint8_t) {}
 uint8_t screen() { return UI_ALT; }
 void setBanner(const char *, const char *) {}
@@ -65,6 +67,7 @@ struct Shared
   uint8_t  screen   = UI_ALT;
   float    battV    = 0.0f;
   char     top[16]  = {0};
+  bool     feet     = UNITS_FEET_DEFAULT;
   char     l1[20]   = {0};
   char     l2[20]   = {0};
 };
@@ -348,7 +351,9 @@ void renderUi(const Shared &st)
     case UI_MENU3:
       g_gfx->setCursor(20, 12);
       g_gfx->print("MENU");
-      drawButton(kBtnWide, RGB565_BLUE, "USB", "DRIVE");
+      drawButton(kBtnLeft,  RGB565_BLUE,   "USB",   "DRIVE");
+      drawButton(kBtnRight, RGB565_ORANGE, "UNITS",
+                 st.feet ? "ft -> m" : "m -> ft");
       drawPager(2, 3);
       break;
 
@@ -454,7 +459,18 @@ void renderFrame(const Shared &st)
   // Altitude in whole metres, as large as will fit. The label that used to sit
   // at the top is gone — the background colour already says which zone we are
   // in, so the text was redundant and the digits get the whole screen.
-  const int32_t alt = (int32_t)lrintf(st.altM);
+  // Units are converted here and nowhere else. Feet round to 10 — at 50 m/s the
+  // foot digit changes 164 times a second, which is unreadable, and rounding is
+  // what production altimeters do.
+  int32_t alt;
+  if (st.feet)
+  {
+    alt = (int32_t)lrintf(st.altM * METRES_TO_FEET / 10.0f) * 10;
+  }
+  else
+  {
+    alt = (int32_t)lrintf(st.altM);
+  }
   char buf[10];
   snprintf(buf, sizeof(buf), "%ld", (long)alt);
   const uint8_t len = strlen(buf);
@@ -465,7 +481,11 @@ void renderFrame(const Shared &st)
   // Layout comes from the font's own measured ink extents, not from
   // getTextBounds: Arduino_GFX invents a baseline of yAdvance*2/3, flagged
   // "arbitrary" in the library, which put the digits off-centre and clipped.
-  const AltFont *af = (len <= 3) ? &kFontAltBig : &kFontAltMed;
+  // The number gets bigger as you get lower, which is when it matters most:
+  // 5 digits (above 10,000 ft) use the smallest face, 3 digits the largest.
+  const AltFont *af = (len <= 3) ? &kFontAltBig
+                    : (len == 4) ? &kFontAltMed
+                                 : &kFontAltSmall;
 
   if (strcmp(buf, g_lastStr) != 0 || af != g_lastAltFont)
   {
@@ -517,11 +537,14 @@ void renderFrame(const Shared &st)
   else
   {
     // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
-    const int32_t vs = (int32_t)lrintf(st.vsMps * 10.0f);
+    // mph pairs with feet, m/s with metres — the conventional pairing.
+    const int32_t vs = st.feet ? (int32_t)lrintf(st.vsMps * MPS_TO_MPH)
+                               : (int32_t)lrintf(st.vsMps * 10.0f);
     if (vs != g_lastVs)
     {
       char vbuf[20];
-      snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
+      if (st.feet) snprintf(vbuf, sizeof(vbuf), "%+4ld mph", (long)vs);
+      else         snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
       g_gfx->setFont(NULL);
       g_gfx->setTextColor(ink, bg);
       g_gfx->setTextSize(2, 2, 0);
@@ -611,6 +634,30 @@ void setBattery(float volts)
   portEXIT_CRITICAL(&g_mux);
 }
 
+void setUnitsFeet(bool feet)
+{
+  portENTER_CRITICAL(&g_mux);
+  const bool changed = (g_shared.feet != feet);
+  g_shared.feet = feet;
+  portEXIT_CRITICAL(&g_mux);
+  if (changed)
+  {
+    // The number changes size and length; force a clean repaint.
+    g_lastAltFont = nullptr;
+    g_lastStr[0]  = '\0';
+    g_lastVs      = INT32_MIN;
+    g_lastBg      = 0xDEAD;
+  }
+}
+
+bool unitsFeet()
+{
+  portENTER_CRITICAL(&g_mux);
+  const bool f = g_shared.feet;
+  portEXIT_CRITICAL(&g_mux);
+  return f;
+}
+
 void setTopText(const char *text)
 {
   portENTER_CRITICAL(&g_mux);
@@ -666,7 +713,8 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnRight, x, y)) return ACT_DEMO;
       return ACT_CANCEL;
     case UI_MENU3:
-      if (inside(kBtnWide, x, y))  return ACT_USB;
+      if (inside(kBtnLeft, x, y))  return ACT_USB;
+      if (inside(kBtnRight, x, y)) return ACT_UNITS;
       return ACT_CANCEL;
     case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:

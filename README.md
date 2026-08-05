@@ -155,6 +155,7 @@ Run the host-side logic tests (no hardware needed):
 | `b <0-255>` | LED brightness |
 | `t` | LED colour sweep |
 | `p` | play every pattern — climb flash, all zones, landing rates, fault |
+| `u` | toggle feet / metres |
 | `c` | toggle serial CSV streaming |
 | `l` | toggle SD logging |
 | `s` | status |

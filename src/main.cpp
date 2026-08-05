@@ -105,6 +105,8 @@ static void loadCalibration()
   g_groundPHpa = g_prefs.isKey("groundP") ? g_prefs.getFloat("groundP") : 0.0f;
   g_calibrated = (g_groundPHpa > 300.0f && g_groundPHpa < 1200.0f);
   if (g_prefs.isKey("bright")) led::setBrightness(g_prefs.getUChar("bright"));
+  display::setUnitsFeet(g_prefs.isKey("feet") ? g_prefs.getUChar("feet") != 0
+                                              : UNITS_FEET_DEFAULT);
 }
 
 // ---------------------------------------------------------------------------
@@ -449,6 +451,17 @@ static void handleGesture(const touch::Event &e)
     case display::ACT_ZERO:    display::setScreen(display::UI_CONFIRM_ZERO);    break;
     case display::ACT_DEMO:    closeMenu(); demo::start();                       break;
     case display::ACT_USB:     display::setScreen(display::UI_CONFIRM_USB);      break;
+    case display::ACT_UNITS:
+    {
+      // Display-only: everything internal stays in metres, so this cannot
+      // disturb a threshold, a test, or the meaning of a log.
+      const bool feet = !display::unitsFeet();
+      display::setUnitsFeet(feet);
+      g_prefs.putUChar("feet", feet ? 1 : 0);
+      Serial.printf("\nUnits: %s\n", feet ? "feet / mph" : "metres / m per s");
+      closeMenu();
+      break;
+    }
     case display::ACT_UNMOUNT: display::setScreen(display::UI_CONFIRM_UNMOUNT); break;
     case display::ACT_POWER:   display::setScreen(display::UI_CONFIRM_POWER);   break;
     case display::ACT_CONFIRM:
@@ -521,6 +534,7 @@ static void printHelp()
     "  c            toggle serial CSV streaming\n"
     "  l            toggle SD logging\n"
     "  s            status\n"
+    "  u            toggle feet / metres\n"
     "  w <unix>     set the clock, so log files are not stamped 1980\n"
     "  T            touch coordinate dump (for calibrating the mapping)\n"
     "  ?            this help"));
@@ -546,6 +560,8 @@ static void printStatus()
 #endif
   Serial.printf("fail streak   : %u   loop overruns: %u\n", g_failStreak, (unsigned)g_overruns);
   Serial.printf("LED brightness: %u\n", led::brightness());
+  Serial.printf("units         : %s (display only; logs stay metric)\n",
+                display::unitsFeet() ? "feet / mph" : "metres / m per s");
   Serial.printf("battery       : %.2f V\n", g_battV);
   Serial.printf("reset reason  : %s\n", g_resetReason);
 #if IDLE_SLEEP_ENABLED
@@ -598,6 +614,14 @@ static void handleCommand(char *line)
       resyncSampleClock();
       break;
     case 's': printStatus(); break;
+    case 'u':
+    {
+      const bool feet = !display::unitsFeet();
+      display::setUnitsFeet(feet);
+      g_prefs.putUChar("feet", feet ? 1 : 0);
+      Serial.printf("\nUnits: %s\n", feet ? "feet / mph" : "metres / m per s");
+      break;
+    }
     case 'w':
     {
       const long epoch = atol(arg);
