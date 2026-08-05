@@ -64,8 +64,13 @@ void    setBanner(const char *line1, const char *line2);
 // What a touch at (x,y) means on the screen currently shown.
 uint8_t hitTest(int16_t x, int16_t y);
 
-// Blank the panel and put the controller to sleep, before deep sleep.
+// Blank the panel and put the controller to sleep, before deep or light sleep.
 void sleep();
+
+// Bring the panel back after a light sleep. The controller keeps its registers
+// (it is separately powered), so this is sleep-out plus display-on rather than
+// a full re-initialisation.
+void wake();
 
 // Bring up the panel. Call from setup(), before startTask().
 // Returns false if the panel did not initialise; everything else then no-ops.

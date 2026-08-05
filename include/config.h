@@ -137,6 +137,25 @@
 #define AUTOZERO_LATCH_ALT_M     150.0f
 #define AUTOZERO_LATCH_CLEAR_MS  120000
 
+// ---- Idle light sleep -----------------------------------------------------
+// The big power lever: ~35 mA of MCU plus ~25 mA of backlight, duty-cycled down
+// to a wake every 30 s. CYPRES does the same thing at the same interval.
+//
+// THE CONDITION IS "ON THE GROUND", NOT "NOT CLIMBING". An aircraft holding at
+// 4000 m for clearance has ~zero vertical speed and looks identical to sitting
+// on the ground — sleeping there would mean up to 30 s of blindness, which at
+// 50 m/s is 1500 m of missed freefall. So sleep requires a low altitude as well
+// as stillness, plus the same in-flight latch the drift correction uses.
+//
+// Climbing at 5 m/s clears 25 m in five seconds, so a 30 s wake still catches
+// the climb by ~150 m, long before anything depends on it.
+#define IDLE_SLEEP_ENABLED       1
+#define IDLE_WAKE_PERIOD_S       30
+#define IDLE_MAX_ALT_M           25.0f    // above this, never sleep
+#define IDLE_MAX_VSPEED_MPS      0.5f
+#define IDLE_QUIET_BEFORE_MS     60000    // must be idle this long before first sleep
+#define IDLE_WAKE_DISPLAY_MS     20000    // a button wake shows the screen this long
+
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
 // This is for "I left it in my gear bag". Deferred while moving, and warned.

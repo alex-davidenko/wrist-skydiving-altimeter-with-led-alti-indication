@@ -69,6 +69,8 @@ static float    g_battV        = 0.0f;
 static uint32_t g_nextBattMs   = 0;
 static const char *g_resetReason = "?";
 static uint32_t g_autoOffWarnMs = 0;
+static uint32_t g_activeSinceMs = 0;    // last time we were NOT idle
+static uint32_t g_wakeShowUntil = 0;    // button wake keeps the screen up
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -286,6 +288,80 @@ static void clearZero()
 }
 
 // ---------------------------------------------------------------------------
+//  Idle light sleep
+// ---------------------------------------------------------------------------
+#if IDLE_SLEEP_ENABLED
+// May we sleep right now?
+//
+// The condition is DEMONSTRABLY ON THE GROUND, not merely "not climbing". An
+// aircraft holding at 4000 m for clearance has ~zero vertical speed and is
+// indistinguishable from sitting on a table by speed alone. Sleeping there
+// would cost up to 30 s of blindness — 1500 m of freefall at terminal. So a low
+// altitude is required as well, plus the same in-flight latch the drift
+// correction uses.
+static bool mayIdleSleep(uint32_t nowMs)
+{
+  if (!g_calibrated) return false;                    // nothing to compare against
+  if (Serial) return false;                           // a host is attached: stay up
+  if (demo::active()) return false;
+  if (display::screen() != display::UI_ALT) return false;
+  if (static_cast<int32_t>(nowMs - g_wakeShowUntil) < 0) return false;
+  if (g_failStreak) return false;                     // sensor unhappy: stay awake
+
+  if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M) return false;
+  if (fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS) return false;
+#if AUTOZERO_ENABLED
+  if (g_groundRef.inFlight()) return false;           // independent guard
+#endif
+
+  return static_cast<uint32_t>(nowMs - g_activeSinceMs) > IDLE_QUIET_BEFORE_MS;
+}
+
+static void idleSleep()
+{
+  Serial.printf("idle: sleeping %d s (alt %.1f m)\n",
+                IDLE_WAKE_PERIOD_S, g_filter.altitude());
+  Serial.flush();
+
+  // Park the renderer and the SD writer first, so we never suspend in the
+  // middle of an SPI frame or a card write.
+  logger::pause();
+  display::sleep();
+
+  esp_sleep_enable_timer_wakeup((uint64_t)IDLE_WAKE_PERIOD_S * 1000000ULL);
+  esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(PIN_BUTTON), 0);
+  esp_light_sleep_start();
+  const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+
+  logger::resume();
+
+  // A 30 s gap makes the filter's velocity state meaningless, so start clean
+  // rather than feeding it a dt of 30 seconds.
+  resyncSampleClock();
+  for (int i = 0; i < 4; i++)
+    if (sensorRead()) g_rawAglM = aglFromPressure(g_pressureHpa);
+  g_filter.reset(g_rawAglM);
+
+  const bool byButton = (cause == ESP_SLEEP_WAKEUP_EXT0);
+  if (byButton)
+  {
+    display::wake();
+    g_wakeShowUntil = millis() + IDLE_WAKE_DISPLAY_MS;
+    g_activeSinceMs = millis();
+    Serial.println(F("idle: woken by button"));
+  }
+  else if (fabsf(g_rawAglM) > IDLE_MAX_ALT_M)
+  {
+    // Something changed while we were out — most likely a climb starting.
+    display::wake();
+    g_activeSinceMs = millis();
+    Serial.printf("idle: woken to %.1f m — staying awake\n", g_rawAglM);
+  }
+  // Otherwise the panel stays dark and we fall straight back to sleep.
+}
+#endif  // IDLE_SLEEP_ENABLED
+
+// ---------------------------------------------------------------------------
 //  Menu actions
 // ---------------------------------------------------------------------------
 static uint32_t g_menuIdleMs = 0;
@@ -414,6 +490,7 @@ static void pollButton(uint32_t nowMs)
     else if (held >= 30)          // debounce
     {
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
+      g_activeSinceMs = nowMs;
       if (demo::active())                            demo::stop();
       else if (display::screen() == display::UI_ALT) openMenu();
       else                                           closeMenu();
@@ -464,6 +541,11 @@ static void printStatus()
   Serial.printf("LED brightness: %u\n", led::brightness());
   Serial.printf("battery       : %.2f V\n", g_battV);
   Serial.printf("reset reason  : %s\n", g_resetReason);
+#if IDLE_SLEEP_ENABLED
+  Serial.printf("idle sleep    : %s (needs alt<%.0fm, still, %ds quiet)\n",
+                mayIdleSleep(millis()) ? "eligible now" : "held awake",
+                (double)IDLE_MAX_ALT_M, (int)(IDLE_QUIET_BEFORE_MS / 1000));
+#endif
   Serial.printf("uptime        : %.1f h of %d h before auto-off\n",
                 millis() / 3600000.0, AUTO_OFF_HOURS);
 #if AUTOZERO_ENABLED
@@ -802,6 +884,7 @@ void loop()
                       rx, ry, e.x, e.y);
       }
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
+      g_activeSinceMs = now;
       if (demo::active())                          demo::stop();
       else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
@@ -883,6 +966,12 @@ void loop()
       g_failStreak++;
     }
 
+    if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M ||
+        fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS)
+    {
+      g_activeSinceMs = now;
+    }
+
 #if AUTOZERO_ENABLED
     // Weather-drift correction. Returns metres to add to the ground reference,
     // almost always zero; see lib/altimeter_core/ground_ref.h for why the
@@ -920,6 +1009,10 @@ void loop()
   // sample loop never touches SPI.
   if (!demoRunning)
     display::publish(pattern, g_filter.altitude(), g_filter.velocity());
+
+#if IDLE_SLEEP_ENABLED
+  if (mayIdleSleep(now)) idleSleep();
+#endif
 
   if (g_csvEnabled && static_cast<int32_t>(now - g_nextCsvMs) >= 0)
   {

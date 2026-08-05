@@ -10,6 +10,8 @@ bool begin(float, float) { return false; }
 void startTask() {}
 void push(uint32_t, float, float, float, float, float, uint8_t, uint8_t, float) {}
 void close() {}
+void pause() {}
+void resume() {}
 void setEnabled(bool) {}
 bool enabled() { return false; }
 bool available() { return false; }
@@ -69,6 +71,7 @@ float    g_qnh       = 1013.25f;
 float    g_groundP   = 0.0f;
 std::atomic<uint32_t> g_rows{0};
 std::atomic<uint32_t> g_drops{0};
+volatile bool g_paused = false;
 
 void writeHeader()
 {
@@ -127,6 +130,8 @@ void writerTask(void *)
 
   for (;;)
   {
+    if (g_paused) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+
     uint32_t tail = g_tail.load(std::memory_order_relaxed);
     const uint32_t head = g_head.load(std::memory_order_acquire);
 
@@ -180,6 +185,16 @@ void close()
   Serial.printf("logger: %s closed, %lu rows. Card is safe to remove.\n",
                 g_name, (unsigned long)rowsWritten());
 }
+void pause()
+{
+  if (!g_ok) return;
+  g_paused = true;
+  delay(60);                 // let the writer finish whatever it was doing
+  g_file.flush();
+}
+
+void resume() { g_paused = false; }
+
 void setEnabled(bool on) { g_enabled = on; }
 const char *filename() { return g_name; }
 uint32_t rowsWritten() { return g_rows.load(std::memory_order_relaxed); }

@@ -16,6 +16,7 @@ uint8_t screen() { return UI_ALT; }
 void setBanner(const char *, const char *) {}
 uint8_t hitTest(int16_t, int16_t) { return ACT_NONE; }
 void sleep() {}
+void wake() {}
 uint32_t lastFillUs() { return 0; }
 bool available() { return false; }
 }  // namespace display
@@ -652,6 +653,28 @@ void sleep()
                          WRITE_COMMAND_8, 0x10,                // sleep in
                          END_WRITE};
   g_bus->batchOperation(off, sizeof(off));
+}
+
+void wake()
+{
+  if (!g_ok) return;
+  const uint8_t on[] = {BEGIN_WRITE,
+                        WRITE_COMMAND_8, 0x11,   // sleep out
+                        END_WRITE};
+  g_bus->batchOperation(on, sizeof(on));
+  delay(120);                                    // panel needs this after 0x11
+  const uint8_t dispon[] = {BEGIN_WRITE, WRITE_COMMAND_8, 0x29, END_WRITE};
+  g_bus->batchOperation(dispon, sizeof(dispon));
+
+  // Everything on screen is stale; force a full repaint.
+  g_lastBg      = 0xDEAD;
+  g_lastScreen  = 0xFF;
+  g_lastAlt     = INT32_MIN;
+  g_lastVs      = INT32_MIN;
+  g_lastBatt    = INT32_MIN;
+  g_lastAltFont = nullptr;
+  g_lastStr[0]  = '\0';
+  g_suspended   = false;
 }
 
 void startTask()

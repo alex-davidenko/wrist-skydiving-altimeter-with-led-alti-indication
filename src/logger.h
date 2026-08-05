@@ -42,6 +42,11 @@ void push(uint32_t tMs, float pressureHpa, float tempC,
 // remove. Logging stays off until the next boot.
 void close();
 
+// Park the writer task and flush, so a light sleep cannot land in the middle
+// of an SD write. resume() restarts it.
+void pause();
+void resume();
+
 void setEnabled(bool on);
 bool enabled();
 bool available();
