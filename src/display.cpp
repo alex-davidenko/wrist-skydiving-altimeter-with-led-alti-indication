@@ -11,6 +11,7 @@ void message(const char *, const char *) {}
 void startTask() {}
 void publish(const LedPattern &, float, float) {}
 void setBattery(float) {}
+void setTopText(const char *) {}
 void setScreen(uint8_t) {}
 uint8_t screen() { return UI_ALT; }
 void setBanner(const char *, const char *) {}
@@ -44,6 +45,7 @@ uint16_t g_lastBg    = 0xDEAD;
 int32_t  g_lastAlt   = INT32_MIN;
 int32_t  g_lastVs    = INT32_MIN;
 int32_t  g_lastBatt  = INT32_MIN;
+char     g_lastTop[16] = {1, 0};      // deliberately not a string we ever set
 const AltFont *g_lastAltFont = nullptr;
 char     g_lastStr[10] = {0};
 
@@ -62,6 +64,7 @@ struct Shared
   float    vsMps    = 0.0f;
   uint8_t  screen   = UI_ALT;
   float    battV    = 0.0f;
+  char     top[16]  = {0};
   char     l1[20]   = {0};
   char     l2[20]   = {0};
 };
@@ -443,6 +446,7 @@ void renderFrame(const Shared &st)
     g_lastAlt     = INT32_MIN;   // everything on top must be redrawn
     g_lastVs      = INT32_MIN;
     g_lastBatt    = INT32_MIN;
+    g_lastTop[0]  = 1; g_lastTop[1] = 0;
     g_lastAltFont = nullptr;
     g_lastStr[0]  = '\0';        // nothing to erase, the fill did it
   }
@@ -489,17 +493,42 @@ void renderFrame(const Shared &st)
     g_lastAlt     = alt;
   }
 
-  // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
-  const int32_t vs = (int32_t)lrintf(st.vsMps * 10.0f);
-  if (vs != g_lastVs)
+  // Top strip: a message if one is set, otherwise vertical speed.
+  const bool topChanged = strcmp(st.top, g_lastTop) != 0;
+  if (topChanged)
   {
-    char vbuf[20];
-    snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
-    g_gfx->setTextColor(ink, bg);
-    g_gfx->setTextSize(2, 2, 0);
-    g_gfx->setCursor(8, 5);
-    g_gfx->print(vbuf);
-    g_lastVs = vs;
+    g_gfx->fillRect(0, 0, g_w - 70, ALT_TOP_BAND, bg);   // leave the battery
+    strncpy(g_lastTop, st.top, sizeof(g_lastTop) - 1);
+    g_lastTop[sizeof(g_lastTop) - 1] = '\0';
+    g_lastVs = INT32_MIN;                                 // force a redraw below
+  }
+
+  if (st.top[0])
+  {
+    if (topChanged)
+    {
+      g_gfx->setFont(NULL);
+      g_gfx->setTextColor(ink, bg);
+      g_gfx->setTextSize(3, 3, 0);
+      g_gfx->setCursor(8, 2);
+      g_gfx->print(st.top);
+    }
+  }
+  else
+  {
+    // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
+    const int32_t vs = (int32_t)lrintf(st.vsMps * 10.0f);
+    if (vs != g_lastVs)
+    {
+      char vbuf[20];
+      snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
+      g_gfx->setFont(NULL);
+      g_gfx->setTextColor(ink, bg);
+      g_gfx->setTextSize(2, 2, 0);
+      g_gfx->setCursor(8, 5);
+      g_gfx->print(vbuf);
+      g_lastVs = vs;
+    }
   }
 
   // Battery, top-right opposite the speed. Quantised to 10 mV so ADC jitter
@@ -579,6 +608,13 @@ void setBattery(float volts)
 {
   portENTER_CRITICAL(&g_mux);
   g_shared.battV = volts;
+  portEXIT_CRITICAL(&g_mux);
+}
+
+void setTopText(const char *text)
+{
+  portENTER_CRITICAL(&g_mux);
+  snprintf(g_shared.top, sizeof(g_shared.top), "%s", text ? text : "");
   portEXIT_CRITICAL(&g_mux);
 }
 

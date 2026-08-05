@@ -117,6 +117,26 @@ LedPattern landingPattern(uint8_t z)
   }
 }
 
+LedPattern flightPattern(uint8_t mode, uint8_t zone, uint8_t landingZone,
+                         float altitudeM, bool inAircraft)
+{
+  if (mode == MODE_FREEFALL) return freefallPattern(zone);
+
+  // In the aircraft — climbing, or levelled off on jump run. Blue with the
+  // altitude, all the way to exit. `inAircraft` is what carries it through the
+  // level-off, when vertical speed alone would look like a canopy ride.
+  if (mode == MODE_CLIMB || inAircraft)
+  {
+    const bool unbuckle = altitudeM >= CLIMB_UNBUCKLE_LO_M &&
+                          altitudeM <= CLIMB_UNBUCKLE_HI_M;
+    return {kBlue, unbuckle ? (uint16_t)CLIMB_UNBUCKLE_BLINK_MS : (uint16_t)0, 0};
+  }
+
+  // Under canopy the freefall colours mean nothing — a good canopy at 900 m
+  // does not warrant a red light.
+  return landingPattern(landingZone);
+}
+
 void flashOnce(const Rgb &c, uint16_t durationMs, uint32_t nowMs)
 {
   g_flashColor   = c;

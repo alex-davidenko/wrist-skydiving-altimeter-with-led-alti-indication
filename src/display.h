@@ -91,6 +91,10 @@ void publish(const LedPattern &pattern, float altitudeM, float vspeedMps);
 // and independently, so the demo does not have to know about it.
 void setBattery(float volts);
 
+// Text for the top strip, replacing the vertical-speed readout. Empty restores
+// the speed. Used for the UNBUCKLE reminder during the climb.
+void setTopText(const char *text);
+
 // Microseconds taken by the last full-screen fill — the expensive operation,
 // worth reporting rather than guessing at.
 uint32_t lastFillUs();

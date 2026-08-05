@@ -71,6 +71,12 @@ static const char *g_resetReason = "?";
 static uint32_t g_autoOffWarnMs = 0;
 static uint32_t g_activeSinceMs = 0;    // last time we were NOT idle
 static uint32_t g_wakeShowUntil = 0;    // button wake keeps the screen up
+#if !BENCH_MODE
+// Latched once a climb passes AIRCRAFT_LATCH_ALT_M. Without it, levelling off
+// on jump run drops vertical speed below the climb threshold, the phase machine
+// calls it CANOPY, and the screen blanks moments before exit.
+static bool     g_inAircraft   = false;
+#endif
 
 // ---------------------------------------------------------------------------
 //  Altitude helpers
@@ -534,7 +540,8 @@ static void printStatus()
   Serial.printf("vertical speed: %.2f m/s\n", g_filter.velocity());
   Serial.printf("zone          : %s\n", zoneName(g_zones.zone()));
 #if !BENCH_MODE
-  Serial.printf("flight phase  : %s\n", flightModeName(g_modes.mode()));
+  Serial.printf("flight phase  : %s%s\n", flightModeName(g_modes.mode()),
+                g_inAircraft ? " (in aircraft)" : "");
   Serial.printf("landing band  : %s\n", landingName(g_landing.zone()));
 #endif
   Serial.printf("fail streak   : %u   loop overruns: %u\n", g_failStreak, (unsigned)g_overruns);
@@ -833,7 +840,7 @@ void setup()
   g_nextCsvMs    = millis();
 }
 
-// Which pattern should the LED be showing right now?
+// Which pattern should the LED and screen be showing right now?
 static LedPattern currentPattern()
 {
   if (g_failStreak >= SENSOR_FAIL_LIMIT) return led::faultPattern();
@@ -841,23 +848,8 @@ static LedPattern currentPattern()
 #if BENCH_MODE
   return led::freefallPattern(g_zones.zone());
 #else
-  switch (g_modes.mode())
-  {
-    case MODE_FREEFALL:
-      return led::freefallPattern(g_zones.zone());
-
-    // Under canopy the freefall colours mean nothing — a good canopy at 900 m
-    // does not warrant a red light. The landing ladder takes over, and it is
-    // dark above 300 m and below 10 m, so the LED stays out of the way for the
-    // whole middle of the canopy ride.
-    case MODE_CANOPY:
-      return led::landingPattern(g_landing.zone());
-
-    // Climbing: dark, except the one-shot green flash every 100 m gained.
-    case MODE_CLIMB:
-    default:
-      return led::offPattern();
-  }
+  return led::flightPattern(g_modes.mode(), g_zones.zone(), g_landing.zone(),
+                            g_filter.altitude(), g_inAircraft);
 #endif
 }
 
@@ -959,6 +951,17 @@ void loop()
       {
         led::flashOnce(led::kGreen, CLIMB_FLASH_MS, now);
       }
+
+      // Aircraft latch: set by a climb well clear of the ground, released by
+      // freefall (the jump) or by coming back down low (a ride down).
+      const float alt = g_filter.altitude();
+      if (mode == MODE_CLIMB && alt > AIRCRAFT_LATCH_ALT_M) g_inAircraft = true;
+      if (mode == MODE_FREEFALL || alt < AIRCRAFT_CLEAR_ALT_M) g_inAircraft = false;
+
+      // UNBUCKLE reminder, shown only on the way up.
+      const bool unbuckle = g_inAircraft && mode != MODE_FREEFALL &&
+                            alt >= CLIMB_UNBUCKLE_LO_M && alt <= CLIMB_UNBUCKLE_HI_M;
+      display::setTopText(unbuckle ? "UNBUCKLE" : "");
 #endif
     }
     else if (g_failStreak < SENSOR_FAIL_LIMIT)

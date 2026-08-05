@@ -20,19 +20,27 @@ struct Leg
   const char *label;
 };
 
-// 4200 m exit, pilot chute at 1100, settled by ~800, five 5-second spirals at
-// 15 m/s, then the landing ladder from 300 m down.
+// Starts on the climb so the UNBUCKLE reminder can be seen, then a 4200 m exit,
+// pilot chute at 1100, settled by ~800, five 5-second spirals at 15 m/s, and the
+// landing ladder from 300 m down.
+//
+// The first climb leg runs at a real 5 m/s so the 500-600 m unbuckle band lasts
+// its true 20 seconds. The rest of the climb is compressed: fourteen minutes of
+// an unchanging blue screen demonstrates nothing.
 const Leg kLegs[] = {
+    {50.0f,   5.0f,   5.0f, "CLIMB"},     // 400 -> 650 m, through the band
+    {120.0f, 30.0f,  30.0f, "CLIMB"},     // compressed, -> ~4250 m
+    { 5.0f,   0.0f,   0.0f, "JUMP RUN"},  // levelled off: the latch matters here
     { 8.0f,   0.0f, -50.0f, "EXIT"},      // accelerating to terminal, -200 m
     {58.0f, -50.0f, -50.0f, "FREEFALL"},  // -2900 m  -> 1100 m
     { 4.0f, -50.0f,  -5.0f, "DEPLOY"},    // -110 m   -> ~990 m
     {38.0f,  -5.0f,  -5.0f, "CANOPY"},    // -190 m   -> 800 m
     {25.0f, -15.0f, -15.0f, "SPIRALS"},   // 5 x 5 s  -> 425 m
     {25.0f,  -5.0f,  -5.0f, "CANOPY"},    // -125 m   -> 300 m
-    {60.0f,  -5.0f,  -5.0f, "LANDING"},   // -300 m   -> 0 m
+    {70.0f,  -5.0f,  -5.0f, "LANDING"},   // -350 m   -> 0 m
 };
 constexpr int kLegCount = sizeof(kLegs) / sizeof(kLegs[0]);
-constexpr float kStartAlt = 4200.0f;
+constexpr float kStartAlt = 400.0f;
 
 bool     g_active   = false;
 uint32_t g_startMs  = 0;
@@ -41,6 +49,7 @@ float    g_totalSecs = 0.0f;
 ZoneTracker       g_zones;
 ZoneTracker       g_landing;
 FlightModeTracker g_modes;
+bool              g_inAircraft = false;
 
 // Altitude and speed at virtual time t, by integrating the legs.
 void profileAt(float t, float *altOut, float *vOut, const char **legOut)
@@ -95,6 +104,7 @@ void start()
   // the 20 m/s threshold. Starting in FREEFALL would show a green flash that
   // does not happen in the air.
   g_modes.reset(MODE_CANOPY);
+  g_inAircraft = false;
 
   g_startMs = millis();
   g_active  = true;
@@ -106,6 +116,7 @@ void stop()
 {
   if (!g_active) return;
   g_active = false;
+  display::setTopText("");
   display::setScreen(display::UI_ALT);
   Serial.println(F("demo: stopped"));
 }
@@ -130,15 +141,17 @@ bool update(uint32_t nowMs)
   const uint8_t land = g_landing.update(alt, nowMs);
   const FlightMode mode = g_modes.update(v, nowMs);
 
-  LedPattern p;
-  switch (mode)
-  {
-    case MODE_FREEFALL: p = led::freefallPattern(zone); break;
-    case MODE_CANOPY:   p = led::landingPattern(land);  break;
-    default:            p = led::offPattern();          break;
-  }
+  // Same aircraft latch the live loop keeps, for the same reason: levelling off
+  // on jump run would otherwise look like a canopy ride and blank the screen.
+  if (mode == MODE_CLIMB && alt > AIRCRAFT_LATCH_ALT_M) g_inAircraft = true;
+  if (mode == MODE_FREEFALL || alt < AIRCRAFT_CLEAR_ALT_M) g_inAircraft = false;
 
-  display::publish(p, alt, v);
+  const bool unbuckle = g_inAircraft && mode != MODE_FREEFALL &&
+                        alt >= CLIMB_UNBUCKLE_LO_M && alt <= CLIMB_UNBUCKLE_HI_M;
+  display::setTopText(unbuckle ? "UNBUCKLE" : "");
+
+  // Built by the same function the live loop uses, so this cannot drift.
+  display::publish(led::flightPattern(mode, zone, land, alt, g_inAircraft), alt, v);
   return true;
 }
 

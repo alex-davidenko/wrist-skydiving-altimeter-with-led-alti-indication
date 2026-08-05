@@ -7,6 +7,7 @@
 
 #include <Arduino.h>
 
+#include "flight_mode.h"
 #include "zones.h"
 
 struct Rgb
@@ -44,6 +45,12 @@ extern const Rgb kMagenta;
 extern const Rgb kWhite;
 
 // Patterns for each state.
+// THE single source of truth for what the device shows in flight. Both the live
+// loop and the demo call this, so a demo cannot drift from reality and a
+// threshold change lands in both at once.
+LedPattern flightPattern(uint8_t mode, uint8_t zone, uint8_t landingZone,
+                         float altitudeM, bool inAircraft);
+
 LedPattern freefallPattern(uint8_t zone);
 LedPattern landingPattern(uint8_t landingZone);
 LedPattern faultPattern();

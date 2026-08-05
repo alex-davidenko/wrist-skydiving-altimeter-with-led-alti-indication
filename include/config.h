@@ -335,6 +335,18 @@
 // than a band change within a mode.
 #define MODE_DWELL_MS              400
 
+// Unbuckle reminder during the climb. 500-600 m at ~5 m/s is a 20 s window.
+#define CLIMB_UNBUCKLE_LO_M     500.0f
+#define CLIMB_UNBUCKLE_HI_M     600.0f
+#define CLIMB_UNBUCKLE_BLINK_MS   700
+
+// Once a climb passes this altitude the display stays in aircraft mode (blue,
+// altitude shown) until freefall begins. Without the latch, levelling off on
+// jump run drops vertical speed below the climb threshold, the phase machine
+// calls it CANOPY, and the screen blanks moments before exit.
+#define AIRCRAFT_LATCH_ALT_M    300.0f
+#define AIRCRAFT_CLEAR_ALT_M    100.0f
+
 // Climb progress: one green flash per this much altitude gained.
 #define CLIMB_MARK_INTERVAL_M    100.0f
 #define CLIMB_FLASH_MS             150
