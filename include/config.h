@@ -170,14 +170,32 @@
 // the device is still down when the loop resumes, and would otherwise register
 // as a fresh press.
 #define BUTTON_WAKE_SWALLOW_MS    3000
-// TEMPORARY DEBUG. Normally a connected host blocks sleep so the panel does not
+//
+// OPEN BUG (unresolved as of Aug 2026): a BOOT wake still holds the panel for
+// 60 s instead of IDLE_WAKE_DISPLAY_MS. Traced cause is that the quiet timer is
+// restarted ~1.1 s after the wake — the button release — despite the swallow
+// above. Removing the in-flight latch from mayIdleSleep() did fix a separate
+// 120 s hold, so the remaining 60 s is the quiet timer alone.
+//
+// Ruled out by simulation, do not re-check: filter velocity transient after
+// reset (peaks 0.47 m/s against a 1.0 threshold), and the wake path itself
+// setting g_activeSinceMs (that line was removed).
+//
+// Next step: set IDLE_TRACE 1 and record which site sets g_activeSinceMs by
+// tagging each assignment with its own name. Four hypotheses from reading the
+// source have been wrong; the trace was right immediately both times.
+// DEBUG AIDS, both off. Set either to 1 to investigate idle sleep again — the
+// trace names the single blocking condition once a second and is far faster
+// than reasoning about the interacting timers. See the OPEN BUG note below.
+//
+// Normally a connected host blocks sleep so the panel does not
 // go dark mid-session — but that also makes the behaviour unobservable over
 // USB, which is the only log we have. With this set, sleep proceeds while
 // plugged in: the CDC port drops when it sleeps and re-enumerates on wake,
 // which is itself the signal. Set back to 0 when done.
-#define IDLE_SLEEP_IGNORE_USB    1
+#define IDLE_SLEEP_IGNORE_USB    0
 // Print, once a second, which condition is holding the device awake.
-#define IDLE_TRACE               1    // a button wake shows the screen this long
+#define IDLE_TRACE               0    // a button wake shows the screen this long
 
 // ---- Automatic power off --------------------------------------------------
 // Hygiene rather than a power measure — with idle sleep the cell lasts weeks.
