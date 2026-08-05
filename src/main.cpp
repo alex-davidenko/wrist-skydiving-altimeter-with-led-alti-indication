@@ -81,6 +81,10 @@ static uint32_t g_wakeShowUntil = 0;    // button wake keeps the screen up
 // after an EXT0 light sleep — the pin is an RTC GPIO at that moment — so it
 // never armed and the release went through anyway.
 static uint32_t g_btnSwallowUntil = 0;
+// Which site last restarted the quiet timer, recorded at the point of
+// assignment. Reading the source has been wrong four times about this.
+static const char *g_activeWho = "boot";
+#define MARK_ACTIVE(t, who) do { g_activeSinceMs = (t); g_activeWho = (who); } while (0)
 #if !BENCH_MODE
 // Latched once a climb passes AIRCRAFT_LATCH_ALT_M. Without it, levelling off
 // on jump run drops vertical speed below the climb threshold, the phase machine
@@ -366,9 +370,9 @@ static void idleTrace(uint32_t nowMs)
   last = nowMs;
   const char *why = idleBlockReason(nowMs);
   if (!why) return;
-  Serial.printf("idle: awake — %s (wake window %+ld ms, quiet %lu ms)\n", why,
+  Serial.printf("idle: awake — %s (wake %+ld ms, quiet %lu ms, set by: %s)\n", why,
                 (long)(int32_t)(g_wakeShowUntil - nowMs),
-                (unsigned long)(nowMs - g_activeSinceMs));
+                (unsigned long)(nowMs - g_activeSinceMs), g_activeWho);
 }
 #endif
 
@@ -415,7 +419,7 @@ static void idleSleep()
   {
     // Something changed while we were out — most likely a climb starting.
     display::wake();
-    g_activeSinceMs = millis();
+    MARK_ACTIVE(millis(), "woke-to-altitude");
     Serial.printf("idle: woken to %.1f m — staying awake\n", g_rawAglM);
   }
   // Otherwise the panel stays dark and we fall straight back to sleep.
@@ -568,7 +572,7 @@ static void pollButton(uint32_t nowMs)
     else if (held >= 30)          // debounce
     {
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
-      g_activeSinceMs = nowMs;
+      MARK_ACTIVE(nowMs, "button-release");
       if (demo::active())                            demo::stop();
       else if (display::screen() == display::UI_ALT) openMenu();
       else                                           closeMenu();
@@ -963,7 +967,7 @@ void loop()
                       rx, ry, e.x, e.y);
       }
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
-      g_activeSinceMs = now;
+      MARK_ACTIVE(now, "touch");
       if (demo::active())                          demo::stop();
       else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
@@ -1059,7 +1063,8 @@ void loop()
     if (fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M ||
         fabsf(g_filter.velocity()) > IDLE_MAX_VSPEED_MPS)
     {
-      g_activeSinceMs = now;
+      MARK_ACTIVE(now, fabsf(g_filter.altitude()) > IDLE_MAX_ALT_M
+                       ? "altitude" : "velocity");
     }
 
 #if AUTOZERO_ENABLED

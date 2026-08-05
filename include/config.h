@@ -181,9 +181,12 @@
 // reset (peaks 0.47 m/s against a 1.0 threshold), and the wake path itself
 // setting g_activeSinceMs (that line was removed).
 //
-// Next step: set IDLE_TRACE 1 and record which site sets g_activeSinceMs by
-// tagging each assignment with its own name. Four hypotheses from reading the
-// source have been wrong; the trace was right immediately both times.
+// Next step: set IDLE_TRACE 1, press BOOT after it sleeps, and read the "set
+// by:" field on the trace line. Every g_activeSinceMs assignment is tagged via
+// MARK_ACTIVE, so that field names the exact site restarting the timer — no
+// hypothesis needed. Expect "button-release" if the swallow is still not
+// catching it. Four hypotheses from reading the source have been wrong; the
+// trace was right immediately both times it was consulted.
 // DEBUG AIDS, both off. Set either to 1 to investigate idle sleep again — the
 // trace names the single blocking condition once a second and is far faster
 // than reasoning about the interacting timers. See the OPEN BUG note below.
