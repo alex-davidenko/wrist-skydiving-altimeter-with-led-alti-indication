@@ -291,8 +291,13 @@ constexpr int16_t  kEyeRy   = 42;      // as EVE rather than as a generic robot
 constexpr uint16_t kEyeBlue = 0x3DBF;  // ~#38B6FF
 
 // The smile: how thin the eye ends up, and how far it sinks while closing.
+// Sink is 0 deliberately. Drifting the blue down as it closed looked smoother
+// but it is the wrong physics: when you smile the upper lid barely moves and
+// only the lower one rises, so the arc should stay where the top of the eye
+// was and the black should do all the travelling. Left as a constant because
+// it is the obvious thing to reach for again.
 constexpr int16_t kSmileThin = 9;
-constexpr int16_t kSmileSink = 26;
+constexpr int16_t kSmileSink = 0;
 
 // One PSRAM cell covering both eyes, composited off-screen and pushed as a
 // single blit. Drawing black to the panel and then the eye on top leaves the
@@ -386,17 +391,21 @@ void bootFace()
   for (int r = kEyeRy; r >= 4; r -= 6) composeEyes(r, 0, kOpen, kEyeBlue), delay(14);
   for (int r = 4; r <= kEyeRy; r += 6) composeEyes(r, 0, kOpen, kEyeBlue), delay(16);
   composeEyes(kEyeRy, 0, kOpen, kEyeBlue);
-  delay(240);
+  delay(110);
 
-  const int kSteps = 16;                  // smile: close from the bottom up
+  // Smile: close from the bottom edge up, and quickly — a smile arrives, it
+  // does not ease in. The blit itself is the floor on frame time here (one
+  // 156x88 cell), so the delay is nominal and the whole close lands near
+  // 140 ms, about 4x faster than it first ran.
+  const int kSteps = 16;
   for (int i = 1; i <= kSteps; i++)
   {
     const int16_t carve = kOpen - (kOpen - kSmileThin) * i / kSteps;
     const int16_t sink  = kSmileSink * i / kSteps;
     composeEyes(kEyeRy, sink, carve, kEyeBlue);
-    delay(26);
+    delay(1);
   }
-  delay(650);
+  delay(750);
 
   for (int i = 11; i >= 0; i--)           // and fade out
   {
