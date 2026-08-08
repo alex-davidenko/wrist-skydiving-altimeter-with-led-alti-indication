@@ -117,9 +117,8 @@ They are separate environments rather than separate branches deliberately: a
 production branch would diverge from this one and need merging forever, while a
 build flag cannot drift. Both are built and tested on every change.
 
-The boot log names the mode. The screen no longer does — the mode banner was
-dropped because it was redundant against the log — so on a board you have not
-just flashed, the serial line is the only check for which build is on it.
+The boot log and the boot banner both name the mode, so which build is on the
+board is never a guess.
 
 **If the link step fails** with `undefined reference to _cleanup_r` or
 `_Unwind_SetEnableExceptionFdeSorting`, the Xtensa toolchain package is
@@ -422,12 +421,21 @@ struct copy, and never touches SPI.
 The screen is driven from the same `LedPattern` the LED uses, so both outputs
 agree by construction rather than by a second colour table kept in step by hand.
 
-**Boot sequence.** Panel up, sensor up, then the eyes: they fade in, blink
-twice and snap into a smile. `bootFace()` deliberately returns there, with the
-smile still up and its cell still allocated, so the boot zero runs while the
-face is smiling rather than over a black screen that would look like a hang;
-`bootFaceOut()` then fades it away. Around six seconds from power-up to a live
-altitude. The animation is also what pays
+**Boot sequence.** Panel up, sensor up, then the eyes: fade in, two blinks, the
+smile snaps closed, fade out. Then the banner fades up with *Setting the ground
+zero*, its three dots cycling once every 350 ms while the boot zero runs, and
+*Flight mode activated* fades in beneath it when the zero lands. Around seven
+seconds from power-up to a live altitude.
+
+The dots are driven from the zero's own sample loop — `zeroHere()` takes a tick
+callback — rather than from a timer running alongside it. A timer would keep
+animating through a stall, or stop while the device was still working; this
+cannot. What is on screen is what it is doing.
+
+Text that can shrink has to be space-padded to a constant width. The banner
+draws with an opaque background, so each pass repaints its own glyph boxes, but
+only the boxes it is given: drop from three dots to none and the old tail would
+otherwise stay lit. The animation is also what pays
 for the sensor's warm-up settle — `BOOT_ZERO_SETTLE_MS` is shorter than
 `FILTER_SETTLE_MS` precisely because the graphics have already run.
 

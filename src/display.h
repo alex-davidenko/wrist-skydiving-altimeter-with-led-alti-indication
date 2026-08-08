@@ -98,6 +98,15 @@ void bootFaceOut();
 void sleepFace();
 
 
+// Two-line boot banner, faded in and out around whatever happens between them.
+// Blocking, same pre-startTask() rule as message(). bannerLine1() repaints line
+// one at full brightness for the progress dots — pad it to a constant width, or
+// a shrinking string leaves its own tail on screen.
+void bannerIn(const char *line1, const char *line2);
+void bannerLine1(const char *line1);
+void bannerLine2In(const char *line2);
+void bannerOut();
+
 // Spawn the renderer on the other core.
 void startTask();
 

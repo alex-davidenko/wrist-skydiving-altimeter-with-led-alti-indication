@@ -10,6 +10,10 @@ bool begin() { return false; }
 void message(const char *, const char *) {}
 void bootFace() {}
 void bootFaceOut() {}
+void bannerIn(const char *, const char *) {}
+void bannerLine1(const char *) {}
+void bannerLine2In(const char *) {}
+void bannerOut() {}
 void sleepFace() {}
 void startTask() {}
 void publish(const LedPattern &, float, float) {}
@@ -508,6 +512,71 @@ void sleepFace()
 
   faceEnd();
 #endif
+}
+
+// Two-line banner, drawn straight to the panel. Safe to fade without an
+// off-screen cell because the text is drawn with an opaque background: each
+// pass repaints its own glyph boxes, so there is never a clear step leaving it
+// blank. That absence is the whole reason the eyes needed a PSRAM cell.
+//
+// A line that can SHRINK must be space-padded by the caller to a constant
+// width, or the tail of the longer previous string is never painted over.
+namespace {
+
+char g_bL1[40] = {0};
+char g_bL2[40] = {0};
+
+uint16_t grey(int num, int den)
+{
+  const uint8_t r = 31 * num / den, g = 63 * num / den, b = 31 * num / den;
+  return static_cast<uint16_t>((r << 11) | (g << 5) | b);
+}
+
+void paintBanner(uint16_t fg1, uint16_t fg2)
+{
+  g_gfx->setTextSize(2, 2, 0);
+  g_gfx->setTextColor(fg1, RGB565_BLACK);
+  g_gfx->setCursor(4, 58);
+  g_gfx->print(g_bL1);
+  g_gfx->setTextColor(fg2, RGB565_BLACK);
+  g_gfx->setCursor(4, 96);
+  g_gfx->print(g_bL2);
+}
+
+}  // namespace
+
+void bannerIn(const char *line1, const char *line2)
+{
+  if (!g_ok) return;
+  snprintf(g_bL1, sizeof(g_bL1), "%s", line1 ? line1 : "");
+  snprintf(g_bL2, sizeof(g_bL2), "%s", line2 ? line2 : "");
+  fillAll(RGB565_BLACK);
+  for (int i = 1; i <= 10; i++) { paintBanner(grey(i, 10), grey(i, 10)); delay(24); }
+  forceRepaint();
+}
+
+void bannerLine1(const char *line1)
+{
+  if (!g_ok) return;
+  snprintf(g_bL1, sizeof(g_bL1), "%s", line1 ? line1 : "");
+  paintBanner(0xFFFF, g_bL2[0] ? 0xFFFF : RGB565_BLACK);
+  forceRepaint();
+}
+
+void bannerLine2In(const char *line2)
+{
+  if (!g_ok) return;
+  snprintf(g_bL2, sizeof(g_bL2), "%s", line2 ? line2 : "");
+  for (int i = 1; i <= 10; i++) { paintBanner(0xFFFF, grey(i, 10)); delay(26); }
+  forceRepaint();
+}
+
+void bannerOut()
+{
+  if (!g_ok) return;
+  for (int i = 9; i >= 0; i--) { paintBanner(grey(i, 10), grey(i, 10)); delay(24); }
+  fillAll(RGB565_BLACK);
+  forceRepaint();
 }
 
 void message(const char *line1, const char *line2)

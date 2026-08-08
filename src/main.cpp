@@ -224,7 +224,29 @@ static void resyncSampleClock()
   g_lastSampleUs = micros();
 }
 
-static bool zeroHere()
+// `tick`, if given, is called once per sample and once per 20 ms of settle
+// wait, so a caller can animate while this blocks. It must be cheap.
+// "Setting the ground zero" plus 0-3 dots, one every 350 ms. Space-padded to a
+// constant width so the shrinking case repaints its own tail — the banner draws
+// opaque, but only over the glyphs it is given.
+static const char kZeroLine[] = "Setting the ground zero   ";
+
+static void zeroDotsTick()
+{
+  static uint32_t lastMs = 0;
+  static uint8_t  dots   = 0;
+  const uint32_t now = millis();
+  if (lastMs && (now - lastMs) < 350) return;
+  lastMs = now;
+
+  char line[40];
+  snprintf(line, sizeof(line), "Setting the ground zero%.*s%*s",
+           dots, "...", 3 - dots, "");
+  display::bannerLine1(line);
+  dots = (dots + 1) % 4;
+}
+
+static bool zeroHere(void (*tick)() = nullptr)
 {
   Serial.println(F("\nZeroing — hold still..."));
   led::set(Rgb{255, 255, 255});
@@ -240,7 +262,11 @@ static bool zeroHere()
   {
     Serial.printf("  sensor still warming, waiting %.1f s first.\n",
                   settleLeft / 1000.0);
-    delay(static_cast<uint32_t>(settleLeft));
+    for (int32_t left = settleLeft; left > 0; left -= 20)
+    {
+      if (tick) tick();
+      delay(20);
+    }
   }
 
   double pSum = 0.0, aSum = 0.0, aSumSq = 0.0, aFirst = 0.0, aSecond = 0.0;
@@ -248,6 +274,7 @@ static bool zeroHere()
 
   for (uint16_t i = 0; i < ZERO_SAMPLE_COUNT; i++)
   {
+    if (tick) tick();
     if (!sensorRead()) continue;
     const double msl = baro::pressureAltitude(g_pressureHpa, g_qnhHpa);
 
@@ -966,14 +993,21 @@ void setup()
   g_zones.reset(g_rawAglM);
 
   display::bootFace();
-#if BOOT_ZERO_ENABLED
-  // Zero while the face is still smiling, so the sampling costs no screen time
-  // of its own. Failure is not fatal: a stored reference or raw pressure
-  // altitude is still better than refusing to boot.
-  if (!zeroHere()) Serial.println(F("Boot zero rejected — use 'z' once it is still."));
-  resyncSampleClock();
-#endif
   display::bootFaceOut();
+#if BOOT_ZERO_ENABLED
+  // The dots are driven by the zero's own sample loop rather than by a timer
+  // running alongside it, so they cannot keep animating past a stall or stop
+  // early — what is on screen is what the device is actually doing.
+  display::bannerIn(kZeroLine, "");
+  if (!zeroHere(zeroDotsTick))
+    Serial.println(F("Boot zero rejected — use 'z' once it is still."));
+  resyncSampleClock();
+  display::bannerLine1("Setting the ground zero...");
+  display::bannerLine2In(BENCH_MODE ? "Bench mode activated"
+                                    : "Flight mode activated");
+  delay(900);
+  display::bannerOut();
+#endif
 #if !BENCH_MODE
   g_landing.reset(g_rawAglM);
   g_modes.reset(MODE_CANOPY);
