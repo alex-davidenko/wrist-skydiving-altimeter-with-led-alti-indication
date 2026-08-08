@@ -888,7 +888,7 @@ void setup()
   // The board has no battery-backed clock and no network, so on a cold start
   // it believes it is 1980 — which is what FAT then stamps on every log file.
   // Seed from the firmware build time so files at least land in the right week,
-  // and use 't <unix>' to set it exactly. The RTC keeps running through deep
+  // and use 'w <unix>' to set it exactly. The RTC keeps running through deep
   // sleep, so a set time survives a power-off/wake cycle.
   {
     static const char kMon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
@@ -905,7 +905,7 @@ void setup()
     {
       const struct timeval tv = {built, 0};
       settimeofday(&tv, nullptr);
-      Serial.printf("Clock seeded from build time; 't <unix>' to set exactly.\n");
+      Serial.printf("Clock seeded from build time; 'w <unix>' to set exactly.\n");
     }
   }
   Serial.println(F("NOT A SAFETY DEVICE — secondary visual aid only."));

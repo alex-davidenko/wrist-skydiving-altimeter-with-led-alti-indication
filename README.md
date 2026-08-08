@@ -185,8 +185,16 @@ Run the host-side logic tests (no hardware needed):
 | `u` | toggle feet / metres (also MENU page 3) |
 | `c` | toggle serial CSV streaming |
 | `l` | toggle SD logging |
+| `w <unix>` | set the clock, so logs are not stamped 1980 |
 | `s` | status |
 | `?` | help |
+
+**Setting the clock.** `date +%s` on the host prints the epoch; paste it into
+the monitor as `w 1786000000`. It is seeded from the build time at boot, so a
+freshly flashed board is already close, and **the RTC keeps running through both
+light and deep sleep** — set it once and it holds until the battery is actually
+disconnected. Expect the internal RC oscillator to drift on the order of a
+minute a day, which is irrelevant for stamping jump logs.
 
 The ground reference and QNH are stored in flash and survive a reboot — useful
 if the board browns out in the aircraft. It still tells you to re-zero on boot,
