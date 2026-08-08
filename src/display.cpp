@@ -24,6 +24,7 @@ bool unitsFeet() { return false; }
 void setScreen(uint8_t) {}
 uint8_t screen() { return UI_ALT; }
 void setBanner(const char *, const char *) {}
+void setClockEdit(const int16_t *, uint8_t) {}
 uint8_t hitTest(int16_t, int16_t) { return ACT_NONE; }
 void sleep() {}
 void wake() {}
@@ -96,6 +97,15 @@ struct Rect { int16_t x, y, w, h; };
 constexpr Rect kBtnLeft  = { 20, 40, 132,  95};
 constexpr Rect kBtnRight = {168, 40, 132,  95};
 constexpr Rect kBtnWide  = { 60, 40, 200,  95};   // single-button pages
+
+// Clock editor: three controls along the bottom, value above them.
+constexpr Rect kClkDown = { 20, 96,  80, 54};
+constexpr Rect kClkNext = {120, 96,  80, 54};
+constexpr Rect kClkUp   = {220, 96,  80, 54};
+
+// Published from the loop. Guarded by the same spinlock as the sample state.
+int16_t g_clkF[5]   = {2026, 1, 1, 0, 0};
+uint8_t g_clkActive = 0;
 
 bool inside(const Rect &r, int16_t x, int16_t y)
 {
@@ -653,7 +663,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_GREEN,  "ZERO",  "HERE");
       drawButton(kBtnRight, RGB565_ORANGE, "POWER", "OFF");
-      drawPager(0, 3);
+      drawPager(0, 4);
       break;
 
     case UI_MENU2:
@@ -661,7 +671,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_BLUE,  "UNMOUNT", "CARD");
       drawButton(kBtnRight, RGB565_GREEN, "DEMO",    "JUMP");
-      drawPager(1, 3);
+      drawPager(1, 4);
       break;
 
     case UI_MENU3:
@@ -670,8 +680,57 @@ void renderUi(const Shared &st)
       drawButton(kBtnLeft,  RGB565_BLUE,   "USB",   "DRIVE");
       drawButton(kBtnRight, RGB565_ORANGE, "UNITS",
                  st.feet ? "ft -> m" : "m -> ft");
-      drawPager(2, 3);
+      drawPager(2, 4);
       break;
+
+    case UI_MENU4:
+      g_gfx->setCursor(20, 12);
+      g_gfx->print("MENU");
+      drawButton(kBtnWide, RGB565_BLUE, "SET", "CLOCK");
+      drawPager(3, 4);
+      break;
+
+    case UI_SET_CLOCK:
+    {
+      int16_t f[5];
+      uint8_t act;
+      portENTER_CRITICAL(&g_mux);
+      memcpy(f, g_clkF, sizeof(f));
+      act = g_clkActive;
+      portEXIT_CRITICAL(&g_mux);
+
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
+               f[0], f[1], f[2], f[3], f[4]);
+
+      // Whole string in white, then the field being edited again in yellow.
+      // The built-in font advances a fixed 12 px at size 2, so a character
+      // index is an x offset — no measuring needed.
+      constexpr int16_t kX = 64, kY = 44, kAdv = 12;
+      static const uint8_t kOff[5] = {0, 5, 8, 11, 14};
+      static const uint8_t kLen[5] = {4, 2, 2, 2, 2};
+      g_gfx->setTextSize(2, 2, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(kX, kY);
+      g_gfx->print(buf);
+      if (act < 5)
+      {
+        char part[6];
+        snprintf(part, sizeof(part), "%.*s", kLen[act], buf + kOff[act]);
+        g_gfx->setTextColor(RGB565_YELLOW, RGB565_BLACK);
+        g_gfx->setCursor(kX + kOff[act] * kAdv, kY);
+        g_gfx->print(part);
+      }
+      g_gfx->setTextSize(1, 1, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(20, 76);
+      g_gfx->print("hold +/- to run   swipe to cancel");
+
+      drawButton(kClkDown, RGB565_BLACK, "-", "");
+      drawButton(kClkNext, RGB565_BLUE,  act < 4 ? "NEXT" : "SET", "");
+      drawButton(kClkUp,   RGB565_BLACK, "+", "");
+      break;
+    }
 
     case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:
@@ -1064,6 +1123,15 @@ uint8_t screen()
   return s;
 }
 
+void setClockEdit(const int16_t *f5, uint8_t active)
+{
+  portENTER_CRITICAL(&g_mux);
+  memcpy(g_clkF, f5, sizeof(g_clkF));
+  g_clkActive = active;
+  portEXIT_CRITICAL(&g_mux);
+  g_lastScreen = 0xFF;          // values changed, so repaint even on the same screen
+}
+
 void setBanner(const char *l1, const char *l2)
 {
   portENTER_CRITICAL(&g_mux);
@@ -1090,6 +1158,16 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnLeft, x, y))  return ACT_USB;
       if (inside(kBtnRight, x, y)) return ACT_UNITS;
       return ACT_CANCEL;
+    case UI_MENU4:
+      if (inside(kBtnWide, x, y)) return ACT_CLOCK;
+      return ACT_CANCEL;
+    case UI_SET_CLOCK:
+      // No cancel-by-tapping-elsewhere here: every stray tap during a fiddly
+      // edit would throw the whole thing away. Swipe cancels instead.
+      if (inside(kClkDown, x, y)) return ACT_CLK_DOWN;
+      if (inside(kClkUp, x, y))   return ACT_CLK_UP;
+      if (inside(kClkNext, x, y)) return ACT_CLK_NEXT;
+      return ACT_NONE;
     case UI_CONFIRM_ZERO:
     case UI_CONFIRM_UNMOUNT:
     case UI_CONFIRM_USB:

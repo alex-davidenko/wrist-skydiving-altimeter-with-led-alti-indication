@@ -8,6 +8,7 @@ namespace touch {
 bool begin() { return false; }
 bool available() { return false; }
 Event takeEvent() { return {EV_NONE, 0, 0}; }
+bool held(int16_t *, int16_t *) { return false; }
 void rawLast(int16_t *x, int16_t *y) { *x = 0; *y = 0; }
 }  // namespace touch
 
@@ -105,6 +106,14 @@ bool begin()
 
   g_ok = true;
   Serial.printf("touch: AXS5106L ready (id %02X %02X %02X)\n", id[0], id[1], id[2]);
+  return true;
+}
+
+bool held(int16_t *x, int16_t *y)
+{
+  if (!g_active) return false;
+  if (x) *x = g_startX;
+  if (y) *y = g_startY;
   return true;
 }
 

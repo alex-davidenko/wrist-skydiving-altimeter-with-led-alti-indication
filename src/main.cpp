@@ -552,6 +552,77 @@ static void zeroFromMenu()
   closeMenu();
 }
 
+// ---------------------------------------------------------------------------
+//  Clock editor
+// ---------------------------------------------------------------------------
+// Five fields, edited one at a time. Held +/- repeats, because a minute field
+// is 0-59 and nobody is tapping that sixty times.
+static int16_t g_clk[5]     = {2026, 1, 1, 0, 0};   // year, month, day, hour, min
+static uint8_t g_clkField   = 0;
+static uint32_t g_clkHeldMs = 0;                    // 0 = not repeating yet
+static uint32_t g_clkRepMs  = 0;
+static bool     g_clkSwallow = false;               // release after a repeat run
+
+static int daysInMonth(int y, int m)
+{
+  static const int d[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (m == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) return 29;
+  return d[(m - 1) % 12];
+}
+
+static void clockPublish() { display::setClockEdit(g_clk, g_clkField); }
+
+static void openClockEdit()
+{
+  const time_t now = time(nullptr);
+  struct tm lt;
+  localtime_r(&now, &lt);
+  g_clk[0] = lt.tm_year + 1900;
+  g_clk[1] = lt.tm_mon + 1;
+  g_clk[2] = lt.tm_mday;
+  g_clk[3] = lt.tm_hour;
+  g_clk[4] = lt.tm_min;
+  g_clkField = 0;
+  g_clkHeldMs = g_clkRepMs = 0;
+  g_clkSwallow = false;
+  clockPublish();
+  display::setScreen(display::UI_SET_CLOCK);
+}
+
+static void clockAdjust(int dir)
+{
+  static const int16_t lo[5] = {2024, 1, 1,  0,  0};
+  const int16_t hi[5] = {2035, 12,
+                         static_cast<int16_t>(daysInMonth(g_clk[0], g_clk[1])),
+                         23, 59};
+  int16_t v = g_clk[g_clkField] + dir;
+  if (v > hi[g_clkField]) v = lo[g_clkField];
+  if (v < lo[g_clkField]) v = hi[g_clkField];
+  g_clk[g_clkField] = v;
+  // A shorter month can strand the day past its end.
+  const int16_t dim = daysInMonth(g_clk[0], g_clk[1]);
+  if (g_clk[2] > dim) g_clk[2] = dim;
+  clockPublish();
+}
+
+static void clockCommit()
+{
+  struct tm t = {};
+  t.tm_year = g_clk[0] - 1900;
+  t.tm_mon  = g_clk[1] - 1;
+  t.tm_mday = g_clk[2];
+  t.tm_hour = g_clk[3];
+  t.tm_min  = g_clk[4];
+  t.tm_isdst = -1;
+  const struct timeval tv = {mktime(&t), 0};
+  settimeofday(&tv, nullptr);
+  Serial.printf("\nClock set: %04d-%02d-%02d %02d:%02d\n",
+                g_clk[0], g_clk[1], g_clk[2], g_clk[3], g_clk[4]);
+  display::setBanner("CLOCK SET", "");
+  delay(900);
+  closeMenu();
+}
+
 static void handleGesture(const touch::Event &e)
 {
   g_menuIdleMs = millis();
@@ -562,13 +633,27 @@ static void handleGesture(const touch::Event &e)
   {
     if (scr == display::UI_MENU)  { display::setScreen(display::UI_MENU2); return; }
     if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU3); return; }
+    if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU4); return; }
   }
   if (e.type == touch::EV_SWIPE_RIGHT)
   {
+    if (scr == display::UI_MENU4) { display::setScreen(display::UI_MENU3); return; }
     if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU2); return; }
     if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU);  return; }
   }
+  // Either swipe abandons the edit; that is the only way out without setting.
+  if (scr == display::UI_SET_CLOCK &&
+      (e.type == touch::EV_SWIPE_LEFT || e.type == touch::EV_SWIPE_RIGHT))
+  {
+    Serial.println(F("\nClock edit cancelled."));
+    closeMenu();
+    return;
+  }
   if (e.type != touch::EV_TAP) return;
+
+  // A press-and-hold ends in a release, which the gesture layer reports as a
+  // tap. Without this the finger you just lifted adds one more step.
+  if (g_clkSwallow) { g_clkSwallow = false; return; }
 
   switch (display::hitTest(e.x, e.y))
   {
@@ -601,6 +686,13 @@ static void handleGesture(const touch::Event &e)
         usbmsc::rebootIntoMode();          // does not return
       }
       else                                       unmountCard();
+      break;
+    case display::ACT_CLOCK:    openClockEdit(); break;
+    case display::ACT_CLK_DOWN: clockAdjust(-1);  break;
+    case display::ACT_CLK_UP:   clockAdjust(+1);  break;
+    case display::ACT_CLK_NEXT:
+      if (g_clkField < 4) { g_clkField++; clockPublish(); }
+      else                  clockCommit();
       break;
     case display::ACT_CANCEL:  closeMenu(); break;
     default: break;
@@ -1059,6 +1151,37 @@ void loop()
   if (touch::available())
   {
     const touch::Event e = touch::takeEvent();
+
+    // Press-and-hold on +/- runs the field. takeEvent() above is what refreshes
+    // the contact, so this has to sit after it. 500 ms before it starts, so a
+    // deliberate single tap never turns into two, then 150 ms a step and 60 ms
+    // once it is clearly a long hold — 59 minutes in about six seconds.
+    if (display::screen() == display::UI_SET_CLOCK)
+    {
+      int16_t hx, hy;
+      if (touch::held(&hx, &hy))
+      {
+        const uint8_t a = display::hitTest(hx, hy);
+        if (a == display::ACT_CLK_DOWN || a == display::ACT_CLK_UP)
+        {
+          if (!g_clkHeldMs) g_clkHeldMs = now;
+          else if (now - g_clkHeldMs > 500)
+          {
+            const uint32_t period = (now - g_clkHeldMs > 2000) ? 60 : 150;
+            if (now - g_clkRepMs >= period)
+            {
+              g_clkRepMs = now;
+              g_clkSwallow = true;
+              clockAdjust(a == display::ACT_CLK_UP ? +1 : -1);
+              MARK_ACTIVE(now, "touch");
+              g_menuIdleMs = now;
+            }
+          }
+        }
+      }
+      else g_clkHeldMs = g_clkRepMs = 0;
+    }
+
     if (e.type != touch::EV_NONE)
     {
       if (g_touchDump)

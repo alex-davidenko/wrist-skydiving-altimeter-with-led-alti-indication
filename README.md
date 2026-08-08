@@ -265,6 +265,23 @@ Use `p` on the console to eyeball every pattern on the bench without flying.
 
 ### Reading logs over USB-C
 
+### Setting the clock without a computer
+
+**MENU -> swipe three times -> SET CLOCK.** Five fields, edited one at a time:
+`-` and `+` change the highlighted one, `NEXT` moves on, and the last press
+reads `SET` and commits. Either swipe abandons the edit — and only a swipe does,
+because a stray tap during a fiddly edit should not throw the whole thing away.
+
+Hold `+` or `-` to run the field: 500 ms before it starts, so a deliberate tap
+never becomes two, then 150 ms a step and 60 ms once it is clearly a long hold.
+That is 0 to 59 minutes in about six seconds. Releasing after a run does not add
+a final step — the gesture layer reports a release as a tap, so that one is
+deliberately swallowed.
+
+The day clamps to the month, February included, and the menu's 15 s idle timeout
+still applies: it is there so a menu can never sit over the altitude in the air,
+and an abandoned edit simply does not commit.
+
 **MENU -> swipe twice -> USB DRIVE** reboots the device as a plain USB mass
 storage device, so the card can be read without pulling it.
 
