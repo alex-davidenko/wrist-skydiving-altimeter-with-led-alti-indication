@@ -81,6 +81,11 @@ bool begin();
 // and for the sensor-fault dead end.
 void message(const char *line1, const char *line2);
 
+// EVE-style boot greeting: two blue eyes fade up on black, blink, then curve
+// into a smile. Blocking, ~2.3 s, and like message() only safe before
+// startTask(). Compiled out by BOOT_FACE_ENABLED.
+void bootFace();
+
 // Spawn the renderer on the other core.
 void startTask();
 

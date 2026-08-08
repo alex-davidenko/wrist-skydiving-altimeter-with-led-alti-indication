@@ -8,6 +8,7 @@
 namespace display {
 bool begin() { return false; }
 void message(const char *, const char *) {}
+void bootFace() {}
 void startTask() {}
 void publish(const LedPattern &, float, float) {}
 void setBattery(float) {}
@@ -266,6 +267,90 @@ bool begin()
   return true;
 }
 
+// The render task caches what it last drew so it can redraw only what changed.
+// Anything that paints the panel behind its back has to say so, or the next
+// frame will leave whatever we drew sitting underneath.
+static void forceRepaint()
+{
+  g_lastBg = 0xDEAD;
+  g_lastAlt = INT32_MIN;
+  g_lastVs = INT32_MIN;
+  g_lastBatt = INT32_MIN;
+  g_lastUnit = 0xFF;
+  g_lastAltFont = nullptr;
+  g_lastStr[0] = '\0';
+}
+
+#if BOOT_FACE_ENABLED
+namespace {
+
+// Eye geometry, in the 320x172 landscape frame.
+constexpr int16_t  kEyeDx   = 46;      // half the gap between the two centres
+constexpr int16_t  kEyeRx   = 30;      // taller than wide, which is what reads
+constexpr int16_t  kEyeRy   = 42;      // as EVE rather than as a generic robot
+constexpr uint16_t kEyeBlue = 0x3DBF;  // ~#38B6FF
+
+uint16_t dim(uint16_t c, int num, int den)
+{
+  const uint8_t r = ((c >> 11) & 0x1F) * num / den;
+  const uint8_t g = ((c >> 5) & 0x3F) * num / den;
+  const uint8_t b = (c & 0x1F) * num / den;
+  return static_cast<uint16_t>((r << 11) | (g << 5) | b);
+}
+
+// One frame. `ry` squashes the eye vertically, which is the blink; `carve`
+// overdraws a black ellipse offset downward, leaving only the top sliver of
+// each eye — a crescent that is thick in the middle and tapers at the sides,
+// which is what reads as a smile. fillEllipse cannot rotate, so the arc has to
+// come from subtraction rather than from tilting anything.
+void drawEyes(int16_t ry, int16_t carve, uint16_t colour)
+{
+  const int16_t cx = DISPLAY_W / 2, cy = DISPLAY_H / 2;
+  g_gfx->fillRect(cx - kEyeDx - kEyeRx - 2, cy - kEyeRy - 2,
+                  2 * (kEyeDx + kEyeRx + 2), 2 * (kEyeRy + 2), RGB565_BLACK);
+  for (int side = -1; side <= 1; side += 2)
+  {
+    const int16_t ex = cx + side * kEyeDx;
+    g_gfx->fillEllipse(ex, cy, kEyeRx, ry, colour);
+    if (carve > 0)
+      g_gfx->fillEllipse(ex, cy + carve, kEyeRx + 2, ry, RGB565_BLACK);
+  }
+}
+
+}  // namespace
+#endif
+
+void bootFace()
+{
+#if BOOT_FACE_ENABLED
+  if (!g_ok) return;
+
+  fillAll(RGB565_BLACK);
+  delay(180);
+
+  for (int i = 1; i <= 12; i++)          // open: fade up from black
+  {
+    drawEyes(kEyeRy, 0, dim(kEyeBlue, i, 12));
+    delay(28);
+  }
+  delay(380);
+
+  for (int r = kEyeRy; r >= 3; r -= 5) { drawEyes(r, 0, kEyeBlue); delay(12); }
+  for (int r = 3; r <= kEyeRy; r += 5) { drawEyes(r, 0, kEyeBlue); delay(14); }
+  drawEyes(kEyeRy, 0, kEyeBlue);
+  delay(220);
+
+  for (int c = 2; c <= kEyeRy * 3 / 5; c += 2)   // smile
+  {
+    drawEyes(kEyeRy, c, kEyeBlue);
+    delay(20);
+  }
+  delay(750);
+
+  forceRepaint();
+#endif
+}
+
 void message(const char *line1, const char *line2)
 {
   if (!g_ok) return;
@@ -276,13 +361,7 @@ void message(const char *line1, const char *line2)
   g_gfx->print(line1 ? line1 : "");
   g_gfx->setCursor(8, 70);
   g_gfx->print(line2 ? line2 : "");
-  g_lastBg = 0xDEAD;          // force a full repaint on the next frame
-  g_lastAlt = INT32_MIN;
-  g_lastVs = INT32_MIN;
-  g_lastBatt = INT32_MIN;
-  g_lastUnit = 0xFF;
-  g_lastAltFont = nullptr;
-  g_lastStr[0] = '\0';
+  forceRepaint();
 }
 
 namespace {

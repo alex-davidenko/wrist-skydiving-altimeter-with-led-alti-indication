@@ -84,6 +84,12 @@
 #define DISPLAY_TASK_STACK 6144
 #define DISPLAY_TASK_PRIO  1
 
+// Boot greeting: two blue eyes fade up on black, blink, then curve into a
+// smile, before the mode banner. Costs ~2.3 s of boot, which also gives the
+// barometer that much longer to finish the warm-up drift documented at
+// FILTER_SETTLE_MS. Purely cosmetic — set to 0 for a silent boot.
+#define BOOT_FACE_ENABLED 1
+
 // ---- AXS5106L capacitive touch -------------------------------------------
 // Shares the I2C bus with the barometer (touch 0x63, MS5611 0x77).
 // Pin numbers confirmed from Waveshare's own Arduino examples.

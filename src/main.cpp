@@ -840,6 +840,7 @@ void setup()
   led::selfTest();
 
   display::begin();
+  display::bootFace();
   display::message("Altimeter", BENCH_MODE ? "BENCH mode" : "FLIGHT mode");
 
   pinMode(PIN_BUTTON, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
