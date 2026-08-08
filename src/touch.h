@@ -43,6 +43,11 @@ bool available();
 // driven from this.
 Event takeEvent();
 
+// True while a finger is still down, with where it landed. Refreshed by
+// takeEvent(), so call that first. Needed for press-and-hold repeat, which
+// the gesture layer alone cannot express — it only speaks on release.
+bool held(int16_t *x, int16_t *y);
+
 // Raw controller coordinates of the last contact, for calibration.
 void rawLast(int16_t *x, int16_t *y);
 

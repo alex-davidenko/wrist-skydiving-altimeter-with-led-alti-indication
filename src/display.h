@@ -38,6 +38,8 @@ enum UiScreen : uint8_t
   UI_MENU,             // page 1: ZERO / POWER OFF
   UI_MENU2,            // page 2: UNMOUNT CARD / DEMO JUMP
   UI_MENU3,            // page 3: USB DRIVE
+  UI_MENU4,            // page 4: SET CLOCK
+  UI_SET_CLOCK,        // the field editor itself
   UI_CONFIRM_ZERO,
   UI_CONFIRM_UNMOUNT,
   UI_CONFIRM_USB,
@@ -55,7 +57,11 @@ enum UiAction : uint8_t
   ACT_UNITS,
   ACT_POWER,
   ACT_CANCEL,
-  ACT_CONFIRM
+  ACT_CONFIRM,
+  ACT_CLOCK,           // open the clock editor
+  ACT_CLK_DOWN,
+  ACT_CLK_UP,
+  ACT_CLK_NEXT
 };
 
 void    setScreen(uint8_t screen);
@@ -64,6 +70,10 @@ void    setBanner(const char *line1, const char *line2);
 
 // What a touch at (x,y) means on the screen currently shown.
 uint8_t hitTest(int16_t x, int16_t y);
+
+// Clock editor contents: year, month, day, hour, minute, and which of the five
+// is being edited. Forces a repaint, so it is safe to call on every change.
+void setClockEdit(const int16_t *f5, uint8_t active);
 
 // Blank the panel and put the controller to sleep, before deep or light sleep.
 void sleep();
