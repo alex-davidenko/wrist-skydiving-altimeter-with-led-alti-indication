@@ -966,15 +966,14 @@ void setup()
   g_zones.reset(g_rawAglM);
 
   display::bootFace();
-  display::bannerIn("ALTIMETER", BENCH_MODE ? "BENCH MODE" : "FLIGHT MODE");
 #if BOOT_ZERO_ENABLED
-  // Zero under the banner rather than after it, so the sampling costs no
-  // screen time of its own. Failure is not fatal: a stored reference or raw
-  // pressure altitude is still better than refusing to boot.
+  // Zero while the face is still smiling, so the sampling costs no screen time
+  // of its own. Failure is not fatal: a stored reference or raw pressure
+  // altitude is still better than refusing to boot.
   if (!zeroHere()) Serial.println(F("Boot zero rejected — use 'z' once it is still."));
   resyncSampleClock();
 #endif
-  display::bannerOut();
+  display::bootFaceOut();
 #if !BENCH_MODE
   g_landing.reset(g_rawAglM);
   g_modes.reset(MODE_CANOPY);

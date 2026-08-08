@@ -117,8 +117,9 @@ They are separate environments rather than separate branches deliberately: a
 production branch would diverge from this one and need merging forever, while a
 build flag cannot drift. Both are built and tested on every change.
 
-The boot log and the startup screen both name the mode, so which build is on
-the board is never a guess.
+The boot log names the mode. The screen no longer does — the mode banner was
+dropped because it was redundant against the log — so on a board you have not
+just flashed, the serial line is the only check for which build is on it.
 
 **If the link step fails** with `undefined reference to _cleanup_r` or
 `_Unwind_SetEnableExceptionFdeSorting`, the Xtensa toolchain package is
@@ -422,10 +423,11 @@ The screen is driven from the same `LedPattern` the LED uses, so both outputs
 agree by construction rather than by a second colour table kept in step by hand.
 
 **Boot sequence.** Panel up, sensor up, then the eyes: they fade in, blink
-twice, snap into a smile, hold, and fade out, and the mode banner fades in
-behind them. The boot zero runs underneath that banner, so its two seconds of
-sampling cost no screen time of their own, and the whole thing lands around
-seven seconds from power-up to a live altitude. The animation is also what pays
+twice and snap into a smile. `bootFace()` deliberately returns there, with the
+smile still up and its cell still allocated, so the boot zero runs while the
+face is smiling rather than over a black screen that would look like a hang;
+`bootFaceOut()` then fades it away. Around six seconds from power-up to a live
+altitude. The animation is also what pays
 for the sensor's warm-up settle — `BOOT_ZERO_SETTLE_MS` is shorter than
 `FILTER_SETTLE_MS` precisely because the graphics have already run.
 
