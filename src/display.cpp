@@ -364,6 +364,16 @@ void composeEyes(int16_t ry, int16_t sink, int16_t carve, uint16_t colour)
   g_gfx->draw16bitRGBBitmap(kFaceX, kFaceY, g_faceBuf, kFaceW, kFaceH);
 }
 
+// Carve this large removes nothing, so it is the "eye fully open" value.
+constexpr int16_t kEyeOpen = 2 * kEyeRy;
+
+void blinkOnce()
+{
+  for (int r = kEyeRy; r >= 4; r -= 6) { composeEyes(r, 0, kEyeOpen, kEyeBlue); delay(12); }
+  for (int r = 4; r <= kEyeRy; r += 6) { composeEyes(r, 0, kEyeOpen, kEyeBlue); delay(14); }
+  composeEyes(kEyeRy, 0, kEyeOpen, kEyeBlue);
+}
+
 }  // namespace
 #endif
 
@@ -376,36 +386,32 @@ void bootFace()
       ps_malloc(static_cast<size_t>(kFaceW) * kFaceH * sizeof(uint16_t)));
   if (!g_faceBuf) return;              // cosmetic only; never block the boot
 
-  constexpr int16_t kOpen = 2 * kEyeRy;   // carve this large removes nothing
-
   fillAll(RGB565_BLACK);
   delay(180);
 
   for (int i = 1; i <= 12; i++)           // eyes fade up
   {
-    composeEyes(kEyeRy, 0, kOpen, dim(kEyeBlue, i, 12));
+    composeEyes(kEyeRy, 0, kEyeOpen, dim(kEyeBlue, i, 12));
     delay(28);
   }
-  delay(380);
+  delay(340);
 
-  for (int r = kEyeRy; r >= 4; r -= 6) composeEyes(r, 0, kOpen, kEyeBlue), delay(14);
-  for (int r = 4; r <= kEyeRy; r += 6) composeEyes(r, 0, kOpen, kEyeBlue), delay(16);
-  composeEyes(kEyeRy, 0, kOpen, kEyeBlue);
-  delay(110);
+  blinkOnce();
+  delay(150);
+  blinkOnce();
+  delay(90);
 
-  // Smile: close from the bottom edge up, and quickly — a smile arrives, it
-  // does not ease in. The blit itself is the floor on frame time here (one
-  // 156x88 cell), so the delay is nominal and the whole close lands near
-  // 140 ms, about 4x faster than it first ran.
-  const int kSteps = 16;
+  // The smile snaps rather than slides: three frames, which at one 156x88 blit
+  // apiece is around 25 ms. Enough motion that it is not a hard cut, too fast
+  // to read as travel. Easing it in looked like the face was thinking about it.
+  const int kSteps = 3;
   for (int i = 1; i <= kSteps; i++)
   {
-    const int16_t carve = kOpen - (kOpen - kSmileThin) * i / kSteps;
+    const int16_t carve = kEyeOpen - (kEyeOpen - kSmileThin) * i / kSteps;
     const int16_t sink  = kSmileSink * i / kSteps;
     composeEyes(kEyeRy, sink, carve, kEyeBlue);
-    delay(1);
   }
-  delay(750);
+  delay(1000);                            // hold the smile
 
   for (int i = 11; i >= 0; i--)           // and fade out
   {
