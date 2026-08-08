@@ -290,6 +290,20 @@ constexpr int16_t  kEyeRx   = 30;      // taller than wide, which is what reads
 constexpr int16_t  kEyeRy   = 42;      // as EVE rather than as a generic robot
 constexpr uint16_t kEyeBlue = 0x3DBF;  // ~#38B6FF
 
+// The smile: how thin the eye ends up, and how far it sinks while closing.
+constexpr int16_t kSmileThin = 9;
+constexpr int16_t kSmileSink = 26;
+
+// One PSRAM cell covering both eyes, composited off-screen and pushed as a
+// single blit. Drawing black to the panel and then the eye on top leaves the
+// region blank for milliseconds, and at this frame rate that reads as flicker —
+// the same fault the altitude digits had, and the same fix.
+constexpr int16_t kFaceX = DISPLAY_W / 2 - (kEyeDx + kEyeRx) - 2;
+constexpr int16_t kFaceY = DISPLAY_H / 2 - kEyeRy - 2;
+constexpr int16_t kFaceW = 2 * (kEyeDx + kEyeRx + 2);
+constexpr int16_t kFaceH = 2 * (kEyeRy + 2);
+uint16_t *g_faceBuf = nullptr;
+
 uint16_t dim(uint16_t c, int num, int den)
 {
   const uint8_t r = ((c >> 11) & 0x1F) * num / den;
@@ -298,23 +312,51 @@ uint16_t dim(uint16_t c, int num, int den)
   return static_cast<uint16_t>((r << 11) | (g << 5) | b);
 }
 
-// One frame. `ry` squashes the eye vertically, which is the blink; `carve`
-// overdraws a black ellipse offset downward, leaving only the top sliver of
-// each eye — a crescent that is thick in the middle and tapers at the sides,
-// which is what reads as a smile. fillEllipse cannot rotate, so the arc has to
-// come from subtraction rather than from tilting anything.
-void drawEyes(int16_t ry, int16_t carve, uint16_t colour)
+// One frame, scanline-rasterised into the cell and blitted once.
+//
+// Each eye is an ellipse of radii (kEyeRx, ry) centred at (ex, cy + sink),
+// minus a second ellipse offset `carve` further down. What survives is the
+// band between the two upper arcs, and at the centre of the eye that band is
+// exactly `carve` tall — so carve == 2*ry leaves the eye whole, and shrinking
+// carve closes it from the bottom edge upward. That is the direction a real
+// smile closes an eye: the cheek pushes the lower lid up while the upper lid
+// barely moves. `sink` then drifts the whole shape down as it thins, so the
+// final arc sits near where the middle of the eye was instead of staying
+// pinned to the top of it.
+void composeEyes(int16_t ry, int16_t sink, int16_t carve, uint16_t colour)
 {
+  if (!g_faceBuf) return;
+  memset(g_faceBuf, 0, static_cast<size_t>(kFaceW) * kFaceH * sizeof(uint16_t));
+
   const int16_t cx = DISPLAY_W / 2, cy = DISPLAY_H / 2;
-  g_gfx->fillRect(cx - kEyeDx - kEyeRx - 2, cy - kEyeRy - 2,
-                  2 * (kEyeDx + kEyeRx + 2), 2 * (kEyeRy + 2), RGB565_BLACK);
-  for (int side = -1; side <= 1; side += 2)
+  if (ry < 1) ry = 1;
+
+  for (int16_t py = 0; py < kFaceH; py++)
   {
-    const int16_t ex = cx + side * kEyeDx;
-    g_gfx->fillEllipse(ex, cy, kEyeRx, ry, colour);
-    if (carve > 0)
-      g_gfx->fillEllipse(ex, cy + carve, kEyeRx + 2, ry, RGB565_BLACK);
+    const int16_t y = kFaceY + py;
+    uint16_t *row = g_faceBuf + static_cast<size_t>(py) * kFaceW;
+
+    const float dy = static_cast<float>(y - (cy + sink)) / ry;
+    if (dy * dy >= 1.0f) continue;
+    const int16_t hw = static_cast<int16_t>(kEyeRx * sqrtf(1.0f - dy * dy));
+
+    int16_t chw = -1;
+    const float cdy = static_cast<float>(y - (cy + sink + carve)) / ry;
+    if (cdy * cdy < 1.0f)
+      chw = static_cast<int16_t>((kEyeRx + 2) * sqrtf(1.0f - cdy * cdy));
+
+    for (int side = -1; side <= 1; side += 2)
+    {
+      const int16_t ex = cx + side * kEyeDx;
+      for (int16_t x = ex - hw; x <= ex + hw; x++)
+      {
+        if (chw >= 0 && x >= ex - chw && x <= ex + chw) continue;
+        const int16_t px = x - kFaceX;
+        if (px >= 0 && px < kFaceW) row[px] = colour;
+      }
+    }
   }
+  g_gfx->draw16bitRGBBitmap(kFaceX, kFaceY, g_faceBuf, kFaceW, kFaceH);
 }
 
 }  // namespace
@@ -325,28 +367,46 @@ void bootFace()
 #if BOOT_FACE_ENABLED
   if (!g_ok) return;
 
+  g_faceBuf = static_cast<uint16_t *>(
+      ps_malloc(static_cast<size_t>(kFaceW) * kFaceH * sizeof(uint16_t)));
+  if (!g_faceBuf) return;              // cosmetic only; never block the boot
+
+  constexpr int16_t kOpen = 2 * kEyeRy;   // carve this large removes nothing
+
   fillAll(RGB565_BLACK);
   delay(180);
 
-  for (int i = 1; i <= 12; i++)          // open: fade up from black
+  for (int i = 1; i <= 12; i++)           // eyes fade up
   {
-    drawEyes(kEyeRy, 0, dim(kEyeBlue, i, 12));
+    composeEyes(kEyeRy, 0, kOpen, dim(kEyeBlue, i, 12));
     delay(28);
   }
   delay(380);
 
-  for (int r = kEyeRy; r >= 3; r -= 5) { drawEyes(r, 0, kEyeBlue); delay(12); }
-  for (int r = 3; r <= kEyeRy; r += 5) { drawEyes(r, 0, kEyeBlue); delay(14); }
-  drawEyes(kEyeRy, 0, kEyeBlue);
-  delay(220);
+  for (int r = kEyeRy; r >= 4; r -= 6) composeEyes(r, 0, kOpen, kEyeBlue), delay(14);
+  for (int r = 4; r <= kEyeRy; r += 6) composeEyes(r, 0, kOpen, kEyeBlue), delay(16);
+  composeEyes(kEyeRy, 0, kOpen, kEyeBlue);
+  delay(240);
 
-  for (int c = 2; c <= kEyeRy * 3 / 5; c += 2)   // smile
+  const int kSteps = 16;                  // smile: close from the bottom up
+  for (int i = 1; i <= kSteps; i++)
   {
-    drawEyes(kEyeRy, c, kEyeBlue);
-    delay(20);
+    const int16_t carve = kOpen - (kOpen - kSmileThin) * i / kSteps;
+    const int16_t sink  = kSmileSink * i / kSteps;
+    composeEyes(kEyeRy, sink, carve, kEyeBlue);
+    delay(26);
   }
-  delay(750);
+  delay(650);
 
+  for (int i = 11; i >= 0; i--)           // and fade out
+  {
+    composeEyes(kEyeRy, kSmileSink, kSmileThin, dim(kEyeBlue, i, 12));
+    delay(24);
+  }
+  delay(120);
+
+  free(g_faceBuf);
+  g_faceBuf = nullptr;
   forceRepaint();
 #endif
 }
