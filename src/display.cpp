@@ -9,6 +9,7 @@ namespace display {
 bool begin() { return false; }
 void message(const char *, const char *) {}
 void bootFace() {}
+void sleepFace() {}
 void bannerIn(const char *, const char *) {}
 void bannerOut() {}
 void startTask() {}
@@ -385,11 +386,24 @@ void composeEyes(int16_t ry, int16_t sink, int16_t carve, uint16_t colour)
 // Carve this large removes nothing, so it is the "eye fully open" value.
 constexpr int16_t kEyeOpen = 2 * kEyeHalfH + 4;
 
-void blinkOnce()
+void blinkOnce(int downMs, int upMs)
 {
-  for (int r = kEyeRy; r >= 3; r -= 4) { composeEyes(r, 0, kEyeOpen, kEyeBlue); delay(12); }
-  for (int r = 3; r <= kEyeRy; r += 4) { composeEyes(r, 0, kEyeOpen, kEyeBlue); delay(14); }
+  for (int r = kEyeRy; r >= 3; r -= 4) { composeEyes(r, 0, kEyeOpen, kEyeBlue); delay(downMs); }
+  for (int r = 3; r <= kEyeRy; r += 4) { composeEyes(r, 0, kEyeOpen, kEyeBlue); delay(upMs); }
   composeEyes(kEyeRy, 0, kEyeOpen, kEyeBlue);
+}
+
+bool faceBegin()
+{
+  g_faceBuf = static_cast<uint16_t *>(
+      ps_malloc(static_cast<size_t>(kFaceW) * kFaceH * sizeof(uint16_t)));
+  return g_faceBuf != nullptr;
+}
+
+void faceEnd()
+{
+  free(g_faceBuf);
+  g_faceBuf = nullptr;
 }
 
 }  // namespace
@@ -400,9 +414,7 @@ void bootFace()
 #if BOOT_FACE_ENABLED
   if (!g_ok) return;
 
-  g_faceBuf = static_cast<uint16_t *>(
-      ps_malloc(static_cast<size_t>(kFaceW) * kFaceH * sizeof(uint16_t)));
-  if (!g_faceBuf) return;              // cosmetic only; never block the boot
+  if (!faceBegin()) return;             // cosmetic only; never block the boot
 
   fillAll(RGB565_BLACK);
   delay(180);
@@ -414,9 +426,9 @@ void bootFace()
   }
   delay(340);
 
-  blinkOnce();
+  blinkOnce(12, 14);
   delay(150);
-  blinkOnce();
+  blinkOnce(12, 14);
   delay(500);
 
   // The smile snaps rather than slides: three frames, which at one 156x88 blit
@@ -438,8 +450,7 @@ void bootFace()
   }
   delay(120);
 
-  free(g_faceBuf);
-  g_faceBuf = nullptr;
+  faceEnd();
   forceRepaint();
 #endif
 }
@@ -466,6 +477,50 @@ static void paintBanner(uint16_t fg)
   g_gfx->print(g_bannerL1);
   g_gfx->setCursor(10, 96);
   g_gfx->print(g_bannerL2);
+}
+
+void sleepFace()
+{
+#if BOOT_FACE_ENABLED
+  if (!g_ok) return;
+
+  // Unlike bootFace(), this runs with the renderer already live on the other
+  // core, so take the panel first — the same handshake sleep() uses.
+  g_suspended = true;
+  delay(80);                            // let any in-flight draw finish
+
+  if (!faceBegin()) return;
+
+  fillAll(RGB565_BLACK);
+  delay(120);
+
+  for (int i = 1; i <= 10; i++)         // eyes fade up
+  {
+    composeEyes(kEyeRy, 0, kEyeOpen, dim(kEyeBlue, i, 10));
+    delay(30);
+  }
+  delay(320);
+
+  blinkOnce(26, 30);                    // two slow, sleepy blinks
+  delay(380);
+  blinkOnce(30, 34);
+  delay(300);
+
+  for (int r = kEyeRy; r >= 1; r -= 3)  // and the last one does not open again
+  {
+    composeEyes(r, 0, kEyeOpen, kEyeBlue);
+    delay(34);
+  }
+  for (int i = 9; i >= 0; i--)
+  {
+    composeEyes(1, 0, kEyeOpen, dim(kEyeBlue, i, 10));
+    delay(26);
+  }
+  fillAll(RGB565_BLACK);
+  delay(150);
+
+  faceEnd();
+#endif
 }
 
 void bannerIn(const char *line1, const char *line2)

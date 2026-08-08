@@ -429,6 +429,12 @@ seven seconds from power-up to a live altitude. The animation is also what pays
 for the sensor's warm-up settle — `BOOT_ZERO_SETTLE_MS` is shorter than
 `FILTER_SETTLE_MS` precisely because the graphics have already run.
 
+Powering off runs the mirror image: the eyes fade up, blink twice slowly, then
+close for good and fade to black before the panel sleeps and the S3 does. That
+one runs with the renderer already live on the other core, so it takes the panel
+through the same suspend handshake `display::sleep()` uses rather than drawing
+into a race. Idle light sleep does *not* play it — it happens every 30 s.
+
 The altitude is drawn in a real typeface (Avenir Next Bold) baked at the size it
 is actually displayed. It was previously the built-in 5x7 font magnified ~17x,
 which turns every source pixel into a 17x17 block — legible but visibly choppy.

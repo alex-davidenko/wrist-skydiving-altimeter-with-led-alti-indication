@@ -506,6 +506,7 @@ static void powerOff()
 
   Serial.println(F("Powering down. Press BOOT or RST to wake."));
   logger::close();
+  display::sleepFace();
   display::sleep();
 
   holdPeripheralsForDeepSleep();

@@ -86,6 +86,12 @@ void message(const char *line1, const char *line2);
 // startTask(). Compiled out by BOOT_FACE_ENABLED.
 void bootFace();
 
+// The going-to-sleep face: eyes fade up, blink twice slowly, then close for
+// good and fade out. Blocking, ~3.5 s. Unlike bootFace() this is safe with the
+// renderer running — it suspends the task first — and it leaves the panel dark,
+// so call display::sleep() straight after.
+void sleepFace();
+
 // Mode banner, faded in and out around whatever happens between them (the
 // boot zero). Blocking, same pre-startTask() rule as message(). bannerOut()
 // remembers the text bannerIn() was given.
