@@ -156,8 +156,14 @@ Run the host-side logic tests (no hardware needed):
    `t_ms, p_hpa, temp_c, raw_m, filt_m, vs_mps, sigma_m, zone`.
    Sitting still, `p_hpa` should be ~950–1030 near sea level, and `filt_m`
    should be far quieter than `raw_m`. That is the filter working.
-5. **Zero it.** Type `z` or hold BOOT for 1.5 s. Two green flashes = success.
-   It refuses and tells you why if the board was moving during the average.
+5. **It zeroes itself at power-up**, while the boot animation plays — the same
+   thing a Viso does. Type `z` or hold BOOT for 1.5 s to redo it by hand. Either
+   way it refuses, and says why, if the board was moving during the average.
+
+   That trusts you to switch it on **on the ground**. Power it up inside a
+   climbing aircraft and it will call that altitude zero. No barometric
+   altimeter that self-zeroes can tell the difference; `BOOT_ZERO_ENABLED`
+   turns it off if you would rather zero by hand.
 
 ---
 
@@ -414,6 +420,14 @@ struct copy, and never touches SPI.
 
 The screen is driven from the same `LedPattern` the LED uses, so both outputs
 agree by construction rather than by a second colour table kept in step by hand.
+
+**Boot sequence.** Panel up, sensor up, then the eyes: they fade in, blink
+twice, snap into a smile, hold, and fade out, and the mode banner fades in
+behind them. The boot zero runs underneath that banner, so its two seconds of
+sampling cost no screen time of their own, and the whole thing lands around
+seven seconds from power-up to a live altitude. The animation is also what pays
+for the sensor's warm-up settle — `BOOT_ZERO_SETTLE_MS` is shorter than
+`FILTER_SETTLE_MS` precisely because the graphics have already run.
 
 The altitude is drawn in a real typeface (Avenir Next Bold) baked at the size it
 is actually displayed. It was previously the built-in 5x7 font magnified ~17x,

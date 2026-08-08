@@ -506,8 +506,6 @@ static void powerOff()
 
   Serial.println(F("Powering down. Press BOOT or RST to wake."));
   logger::close();
-  display::setBanner("POWERING OFF", "BOOT/RST to wake");
-  delay(1500);
   display::sleep();
 
   holdPeripheralsForDeepSleep();
@@ -840,8 +838,6 @@ void setup()
   led::selfTest();
 
   display::begin();
-  display::bootFace();
-  display::message("Altimeter", BENCH_MODE ? "BENCH mode" : "FLIGHT mode");
 
   pinMode(PIN_BUTTON, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
 
@@ -925,6 +921,11 @@ void setup()
     }
   }
 
+  // The warm-up drift starts here, not at the end of setup, so this is where
+  // the settle window belongs. The boot animation then runs inside it and the
+  // boot zero below costs no extra waiting.
+  g_filterSettledMs = millis() + BOOT_ZERO_SETTLE_MS;
+
   g_prefs.begin("altimeter", false);
   loadCalibration();
 
@@ -943,10 +944,16 @@ void setup()
   g_climb.configure(CLIMB_MARK_INTERVAL_M);
 #endif
 
+#if BOOT_ZERO_ENABLED
+  if (g_calibrated)
+    Serial.printf("Restored ground ref %.3f hPa from flash; the boot zero below supersedes it.\n",
+                  g_groundPHpa);
+#else
   if (g_calibrated)
     Serial.printf("Restored ground ref %.3f hPa from flash — RE-ZERO before use.\n", g_groundPHpa);
   else
     Serial.println(F("No ground reference stored. Press 'z' or hold BOOT for 1.5 s."));
+#endif
 
   // Prime the filter so the first zone decision is not made from a cold start.
   for (int i = 0; i < 8; i++)
@@ -956,6 +963,17 @@ void setup()
   checkPressurePlausible();
   g_filter.reset(g_rawAglM);
   g_zones.reset(g_rawAglM);
+
+  display::bootFace();
+  display::bannerIn("ALTIMETER", BENCH_MODE ? "BENCH MODE" : "FLIGHT MODE");
+#if BOOT_ZERO_ENABLED
+  // Zero under the banner rather than after it, so the sampling costs no
+  // screen time of its own. Failure is not fatal: a stored reference or raw
+  // pressure altitude is still better than refusing to boot.
+  if (!zeroHere()) Serial.println(F("Boot zero rejected — use 'z' once it is still."));
+  resyncSampleClock();
+#endif
+  display::bannerOut();
 #if !BENCH_MODE
   g_landing.reset(g_rawAglM);
   g_modes.reset(MODE_CANOPY);

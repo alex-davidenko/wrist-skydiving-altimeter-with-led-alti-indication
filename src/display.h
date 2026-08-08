@@ -86,6 +86,12 @@ void message(const char *line1, const char *line2);
 // startTask(). Compiled out by BOOT_FACE_ENABLED.
 void bootFace();
 
+// Mode banner, faded in and out around whatever happens between them (the
+// boot zero). Blocking, same pre-startTask() rule as message(). bannerOut()
+// remembers the text bannerIn() was given.
+void bannerIn(const char *line1, const char *line2);
+void bannerOut();
+
 // Spawn the renderer on the other core.
 void startTask();
 

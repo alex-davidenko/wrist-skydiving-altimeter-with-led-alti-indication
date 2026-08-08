@@ -9,6 +9,8 @@ namespace display {
 bool begin() { return false; }
 void message(const char *, const char *) {}
 void bootFace() {}
+void bannerIn(const char *, const char *) {}
+void bannerOut() {}
 void startTask() {}
 void publish(const LedPattern &, float, float) {}
 void setBattery(float) {}
@@ -440,6 +442,48 @@ void bootFace()
   g_faceBuf = nullptr;
   forceRepaint();
 #endif
+}
+
+static uint16_t dimColour(uint16_t c, int num, int den)
+{
+  const uint8_t r = ((c >> 11) & 0x1F) * num / den;
+  const uint8_t g = ((c >> 5) & 0x3F) * num / den;
+  const uint8_t b = (c & 0x1F) * num / den;
+  return static_cast<uint16_t>((r << 11) | (g << 5) | b);
+}
+
+static char g_bannerL1[24] = {0};
+static char g_bannerL2[24] = {0};
+
+// Opaque text colour, so each pass repaints its own glyph boxes. That is what
+// makes fading safe to do straight to the panel: there is never a clear step
+// leaving the text blank, which is the flicker the eyes had.
+static void paintBanner(uint16_t fg)
+{
+  g_gfx->setTextColor(fg, RGB565_BLACK);
+  g_gfx->setTextSize(2, 2, 0);
+  g_gfx->setCursor(10, 58);
+  g_gfx->print(g_bannerL1);
+  g_gfx->setCursor(10, 96);
+  g_gfx->print(g_bannerL2);
+}
+
+void bannerIn(const char *line1, const char *line2)
+{
+  if (!g_ok) return;
+  snprintf(g_bannerL1, sizeof(g_bannerL1), "%s", line1 ? line1 : "");
+  snprintf(g_bannerL2, sizeof(g_bannerL2), "%s", line2 ? line2 : "");
+  fillAll(RGB565_BLACK);
+  for (int i = 1; i <= 10; i++) { paintBanner(dimColour(0xFFFF, i, 10)); delay(26); }
+  forceRepaint();
+}
+
+void bannerOut()
+{
+  if (!g_ok) return;
+  for (int i = 9; i >= 0; i--) { paintBanner(dimColour(0xFFFF, i, 10)); delay(24); }
+  fillAll(RGB565_BLACK);
+  forceRepaint();
 }
 
 void message(const char *line1, const char *line2)

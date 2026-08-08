@@ -90,6 +90,24 @@
 // FILTER_SETTLE_MS. Purely cosmetic — set to 0 for a silent boot.
 #define BOOT_FACE_ENABLED 1
 
+// Zero the altitude at power-up, the way a Viso does, while the eyes play. The
+// device is on the ground when you switch it on, so the reference it stores
+// then is the right one — and it means the altitude is already zeroed by the
+// time the screen shows a number, rather than waiting for a manual 'z'.
+//
+// SAFETY: this trusts that you power up on the ground. Switch it on inside a
+// climbing aircraft and it will happily call that altitude zero. Every baro
+// altimeter that self-zeroes has this property; none of them can tell the
+// difference. Power it up before you board.
+//
+// The settle wait is shorter than FILTER_SETTLE_MS because the boot animation
+// has already run by the time this fires — 3 s from sensor init, against a
+// warm-up excursion measured to finish by 1.3 s — so the wait costs nothing on
+// top of the graphics. Anything left over is what the weather-drift correction
+// exists to clean up.
+#define BOOT_ZERO_ENABLED     1
+#define BOOT_ZERO_SETTLE_MS   3000
+
 // ---- AXS5106L capacitive touch -------------------------------------------
 // Shares the I2C bus with the barometer (touch 0x63, MS5611 0x77).
 // Pin numbers confirmed from Waveshare's own Arduino examples.
