@@ -101,7 +101,7 @@ void writeHeader()
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
     g_file.printf("# started=%s\n", ts);
   }
-  g_file.printf("# build=%s %s\n", __DATE__, __TIME__);
+  g_file.printf("# version=%s build=%s %s\n", FW_VERSION, __DATE__, __TIME__);
   g_file.printf("t_ms,p_hpa,temp_c,alt_raw_m,alt_filt_m,vs_mps,zone,phase,ground_p\n");
   g_file.flush();
 }

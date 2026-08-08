@@ -1,5 +1,5 @@
 // ===========================================================================
-//  Wrist-mounted skydiving altimeter — phase 1 firmware
+//  Wrist-mounted skydiving altimeter — firmware (see FW_VERSION in config.h)
 //
 //  MS5611 (GY-63) over I2C -> ISA pressure altitude -> Kalman filter ->
 //  hysteresis/dwell zone state machine -> RGB LED.
@@ -869,7 +869,8 @@ void setup()
 
   pinMode(PIN_BUTTON, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
 
-  Serial.println(F("\n\n=== Skydiving altimeter — phase 1 ==="));
+  Serial.printf("\n\n=== Skydiving altimeter v%s (%s) ===\n",
+                FW_VERSION, BENCH_MODE ? "BENCH" : "FLIGHT");
   // The power LEDs are hard-wired and stay lit in deep sleep, so they say
   // nothing about whether sleep worked. The reset reason does: waking from
   // deep sleep reports DEEPSLEEP, a plain power-up or RST does not.

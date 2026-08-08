@@ -1,6 +1,11 @@
-# Wrist altimeter — phase 1
+# Wrist altimeter — v0.9.0
 
 ESP32-S3 + MS5611 (GY-63) → filtered altitude → colour-coded 172×320 panel.
+
+Version lives in `FW_VERSION` in `config.h` and is stamped into the boot log and
+every jump log header. **1.0.0 is reserved for the first firmware that has flown
+and been checked against a reference altimeter** — until then it stays 0.x,
+however finished it looks on a desk.
 
 Three flight phases, chosen automatically from vertical speed:
 

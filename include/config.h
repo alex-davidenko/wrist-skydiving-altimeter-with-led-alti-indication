@@ -7,6 +7,18 @@
 #include "zones.h"
 
 // ===========================================================================
+//  VERSION
+// ===========================================================================
+// Recorded in the boot log and in every jump log's header, so a log always
+// says which firmware produced it — the compile timestamp already there
+// identifies a build, but not what was in it.
+//
+// The scheme: 1.0.0 is reserved for the first firmware that has actually
+// flown and been checked against a reference altimeter. Everything before
+// that is 0.x, however finished it looks on a desk.
+#define FW_VERSION "0.9.0"
+
+// ===========================================================================
 //  MODE
 // ===========================================================================
 // 1 = BENCH: thresholds scaled to desk height (metres instead of kilometres)
