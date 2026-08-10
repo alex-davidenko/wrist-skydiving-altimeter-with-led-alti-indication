@@ -709,6 +709,10 @@ void renderUi(const Shared &st)
       g_gfx->setCursor(20, 12);
       g_gfx->print("MENU");
       drawButton(kBtnWide, RGB565_GREEN, "LOG", "BOOK");
+#if LED_TEST_ENABLED
+      drawButton(kBtnLeft,  RGB565_BLUE,  "LOG",  "BOOK");
+      drawButton(kBtnRight, RGB565_GREEN, "LED",  "TEST");
+#endif
       drawPager(4, 5);
       break;
 
@@ -786,6 +790,35 @@ void renderUi(const Shared &st)
       }
       g_gfx->setCursor(14, 158);
       g_gfx->print("tap to go back");
+      break;
+    }
+    case UI_LED_TEST:
+    {
+      char nm[32]; int16_t br; uint8_t act;
+      portENTER_CRITICAL(&g_mux);
+      snprintf(nm, sizeof(nm), "%s", g_lbRow[0]);
+      br = g_clkF[0]; act = g_clkActive;
+      portEXIT_CRITICAL(&g_mux);
+
+      g_gfx->setTextSize(2, 2, 0);
+      g_gfx->setTextColor(act == 0 ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(10, 16);
+      char line[24];
+      snprintf(line, sizeof(line), "%-14s", nm);
+      g_gfx->print(line);
+
+      g_gfx->setTextColor(act == 1 ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(10, 48);
+      snprintf(line, sizeof(line), "bright %3d    ", br);
+      g_gfx->print(line);
+
+      g_gfx->setTextSize(1, 1, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(10, 78);
+      g_gfx->print("NEXT switches field, then DONE");
+      drawButton(kClkDown, RGB565_BLACK, "-", "");
+      drawButton(kClkNext, RGB565_BLUE, act < 1 ? "NEXT" : "DONE", "");
+      drawButton(kClkUp,   RGB565_BLACK, "+", "");
       break;
     }
     case UI_SET_JUMPNO:
@@ -1292,6 +1325,17 @@ void setJumpDetail(const char *title, const char lines[5][32])
   g_lastScreen = 0xFF;
 }
 
+void setLedTest(const char *name, uint8_t bright, uint8_t active)
+{
+  portENTER_CRITICAL(&g_mux);
+  snprintf(g_lbRow[0], sizeof(g_lbRow[0]), "%s", name ? name : "");
+  g_clkF[0] = bright;
+  g_clkActive = active;
+  g_shared.screen = UI_LED_TEST;
+  portEXIT_CRITICAL(&g_mux);
+  g_lastScreen = 0xFF;
+}
+
 void setJumpEdit(const int16_t *d4, uint8_t active)
 {
   portENTER_CRITICAL(&g_mux);
@@ -1342,6 +1386,11 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnRight, x, y)) return ACT_JUMPNO;
       return ACT_CANCEL;
     case UI_MENU5:
+#if LED_TEST_ENABLED
+      if (inside(kBtnLeft, x, y))  return ACT_LOGBOOK;
+      if (inside(kBtnRight, x, y)) return ACT_LEDTEST;
+      return ACT_CANCEL;
+#endif
       if (inside(kBtnWide, x, y)) return ACT_LOGBOOK;
       return ACT_CANCEL;
     case UI_LOGBOOK:
@@ -1355,6 +1404,7 @@ uint8_t hitTest(int16_t x, int16_t y)
       return ACT_NONE;
     case UI_JUMP_DETAIL:
       return ACT_LOGBOOK;                 // any tap goes back to the list
+    case UI_LED_TEST:
     case UI_SET_JUMPNO:
     case UI_SET_CLOCK:
       // No cancel-by-tapping-elsewhere here: every stray tap during a fiddly

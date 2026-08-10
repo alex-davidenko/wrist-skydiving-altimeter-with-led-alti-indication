@@ -32,6 +32,12 @@ void begin();
 void set(const Rgb &c, uint8_t brightness = 0);
 void off();
 
+// Strip power, through the high-side MOSFET. Idle current is ~1 mA per pixel
+// whatever they are showing, so this is what keeps a bracelet off the power
+// budget. No-op when PIN_LED_PWR is -1.
+void power(bool on);
+bool powered();
+
 void setBrightness(uint8_t b);
 uint8_t brightness();
 

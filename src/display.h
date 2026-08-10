@@ -41,6 +41,7 @@ enum UiScreen : uint8_t
   UI_MENU4,            // page 4: SET CLOCK
   UI_SET_CLOCK,        // the field editor itself
   UI_SET_JUMPNO,       // same editor, four digits, your jump total
+  UI_LED_TEST,         // bench only: strip bring-up
   UI_MENU5,            // page 5: LOGBOOK
   UI_LOGBOOK,          // list of jumps read off the card
   UI_JUMP_DETAIL,      // one jump's numbers
@@ -64,6 +65,7 @@ enum UiAction : uint8_t
   ACT_CONFIRM,
   ACT_CLOCK,           // open the clock editor
   ACT_JUMPNO,          // open the jump-number editor
+  ACT_LEDTEST,         // open the LED bring-up screen
   ACT_LOGBOOK,         // open the logbook
   ACT_LOG_ROW0,        // tap a row in the list
   ACT_LOG_ROW1,
@@ -88,6 +90,9 @@ void setClockEdit(const int16_t *f5, uint8_t active);
 // Four digits, most significant first. Shares the clock editor's buttons and
 // its ACT_CLK_* actions — same gesture, so there is one thing to learn.
 void setJumpEdit(const int16_t *d4, uint8_t active);
+// Bench LED bring-up: pattern name, brightness, and which of the two is being
+// edited. Shares the clock editor's buttons.
+void setLedTest(const char *name, uint8_t bright, uint8_t active);
 
 // One page of the logbook. `rows` are three pre-formatted lines, empty for a
 // slot with nothing in it; `page`/`pages` drive the footer.

@@ -61,6 +61,25 @@
 #define LED_DRIVER    LED_DRIVER_NEOPIXEL
 #define PIN_LED       7
 
+// How many WS2812B in the chain. They are addressed by position, so this must
+// match the hardware or the tail of the strip stays dark.
+//
+// Update time scales at ~30 us per pixel with interrupts disabled, so a long
+// chain competes with the I2C conversion and the panel's SPI frame. At 10 that
+// is 0.3 ms and harmless; past ~30 it is worth measuring before trusting it.
+#define LED_COUNT     10
+
+// Gate of a high-side P-channel MOSFET (IRLML6402) between VBAT and the strip.
+// Each WS2812B draws ~1 mA just running its controller, even showing black —
+// ten of them is 10 mA against a 765 uA deep sleep, so an unswitched strip
+// would cost more standby current than the entire rest of the device.
+//
+// Active LOW: the gate has a 10k pull-up to VBAT so the strip is OFF whenever
+// this pin is floating, which is the case at boot before setup() runs and
+// during sleep. Set to -1 if the MOSFET is not fitted yet.
+#define PIN_LED_PWR   4
+#define LED_PWR_ON    LOW
+
 #define PIN_LED_R     1
 #define PIN_LED_G     2
 #define PIN_LED_B     3
@@ -353,6 +372,11 @@
 // 0-255. The onboard WS2812 is retina-searing indoors; turn this up when you
 // move to an external high-power LED for daylight use.
 #define LED_BRIGHTNESS   40
+
+// Bench-only LED bring-up screen: MENU page 5. Steps through every pattern the
+// flight build can show, at a chosen brightness, so a strip can be judged in
+// daylight without jumping.
+#define LED_TEST_ENABLED  BENCH_MODE
 
 // Blinking red is the "below 800 m" warning — the most urgent thing this
 // device says. 167 ms = 6 blinks/s, matching the fastest landing rate.

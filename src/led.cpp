@@ -4,7 +4,7 @@
 
 #if LED_DRIVER == LED_DRIVER_NEOPIXEL
   #include <Adafruit_NeoPixel.h>
-  static Adafruit_NeoPixel g_pixel(1, PIN_LED, NEO_GRB + NEO_KHZ800);
+  static Adafruit_NeoPixel g_pixel(LED_COUNT, PIN_LED, NEO_GRB + NEO_KHZ800);
 #endif
 
 namespace led {
@@ -64,7 +64,10 @@ void set(const Rgb &c, uint8_t bright)
 #if LED_DRIVER == LED_DRIVER_NONE
   (void)r; (void)g; (void)bl;
 #elif LED_DRIVER == LED_DRIVER_NEOPIXEL
-  g_pixel.setPixelColor(0, g_pixel.Color(r, g, bl));
+  // Whole strip as one lamp: every pixel shows the zone colour, so a bracelet
+  // reads as a single band rather than a row of dots.
+  const uint32_t c32 = g_pixel.Color(r, g, bl);
+  for (uint16_t i = 0; i < LED_COUNT; i++) g_pixel.setPixelColor(i, c32);
   g_pixel.show();
 #elif LED_DRIVER == LED_DRIVER_RGB_CC
   analogWrite(PIN_LED_R, r);
@@ -78,6 +81,20 @@ void set(const Rgb &c, uint8_t bright)
 }
 
 void off() { set(kBlack); }
+
+static bool g_powered = false;
+
+void power(bool on)
+{
+#if PIN_LED_PWR >= 0
+  pinMode(PIN_LED_PWR, OUTPUT);
+  digitalWrite(PIN_LED_PWR, on ? LED_PWR_ON : !LED_PWR_ON);
+  if (on) delay(2);            // let the strip's rail come up before clocking data
+#endif
+  g_powered = on;
+}
+
+bool powered() { return g_powered; }
 
 void setBrightness(uint8_t b) { g_brightness = b; }
 uint8_t brightness() { return g_brightness; }

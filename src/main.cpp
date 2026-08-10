@@ -546,6 +546,15 @@ static void unmountCard()
 // latches a level once the CPU is off. See config.h for the measurements.
 static void holdPeripheralsForDeepSleep()
 {
+#if PIN_LED_PWR >= 0
+  // Latch the strip OFF. The gate's 10k pull-up would hold it off anyway once
+  // the pin floats, but a floating gate on a MOSFET is a half-on gate for as
+  // long as it takes to charge, and 10 pixels idling is 13x the whole device's
+  // deep-sleep budget.
+  pinMode(PIN_LED_PWR, OUTPUT);
+  digitalWrite(PIN_LED_PWR, !LED_PWR_ON);
+  gpio_hold_en(static_cast<gpio_num_t>(PIN_LED_PWR));
+#endif
 #if DEEPSLEEP_HOLD_TOUCH_RST
   pinMode(PIN_TOUCH_RST, OUTPUT);
   digitalWrite(PIN_TOUCH_RST, LOW);
@@ -576,6 +585,7 @@ static void powerOff()
 
   Serial.println(F("Powering down. Press BOOT or RST to wake."));
   logger::close();
+  led::power(false);            // ~1 mA per pixel even showing black
   display::sleepFace();
   display::sleep();
 
@@ -734,6 +744,56 @@ static void openJumpDetail(uint8_t row)
   display::setJumpDetail(title, L);
 }
 
+#if LED_TEST_ENABLED
+// Bench LED bring-up. Every pattern the flight build can produce, driven
+// through the same led::render() the real thing uses, so what you judge in
+// daylight is what you will actually see in the air.
+static const struct { const char *name; Rgb c; uint16_t periodMs; } kLedTests[] = {
+  {"OFF",         led::kBlack,   0},
+  {"GREEN",       led::kGreen,   0},
+  {"YELLOW",      led::kYellow,  0},
+  {"RED",         led::kRed,     0},
+  {"BLINK RED",   led::kRed,     BLINK_PERIOD_MS},
+  {"LAND 3/s",    led::kGreen,   167},
+  {"LAND 6/s",    led::kGreen,   83},
+  {"CLIMB BLUE",  led::kBlue,    0},
+  {"WHITE",       led::kWhite,   0},
+};
+static const uint8_t kLedTestCount = sizeof(kLedTests) / sizeof(kLedTests[0]);
+static uint8_t g_ltIdx = 1, g_ltField = 0;
+static uint8_t g_ltBright = LED_BRIGHTNESS;
+
+static void ledTestPublish()
+{ display::setLedTest(kLedTests[g_ltIdx].name, g_ltBright, g_ltField); }
+
+static void openLedTest()
+{
+  g_ltIdx = 1; g_ltField = 0; g_ltBright = LED_BRIGHTNESS;
+  g_clkHeldMs = g_clkRepMs = 0; g_clkSwallow = false;
+  led::power(true);
+  ledTestPublish();
+}
+
+static void ledTestStep(int dir)
+{
+  if (g_ltField == 0)
+    g_ltIdx = (uint8_t)((g_ltIdx + kLedTestCount + dir) % kLedTestCount);
+  else
+  {
+    const int v = g_ltBright + dir * 5;
+    g_ltBright = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+  }
+  ledTestPublish();
+}
+
+static void closeLedTest()
+{
+  led::power(false);
+  led::off();
+  closeMenu();
+}
+#endif
+
 static void clockPublish() { display::setClockEdit(g_clk, g_clkField); }
 
 static void openClockEdit()
@@ -871,6 +931,9 @@ static void handleGesture(const touch::Event &e)
       break;
     case display::ACT_CLOCK:    openClockEdit(); break;
     case display::ACT_JUMPNO:   openJumpEdit(); break;
+#if LED_TEST_ENABLED
+    case display::ACT_LEDTEST:  openLedTest(); break;
+#endif
     case display::ACT_LOGBOOK:
       // From the menu this means "open the logbook" and has to read the card.
       // From the detail view it means "back to the list", which must not — a
@@ -886,14 +949,28 @@ static void handleGesture(const touch::Event &e)
     // Both editors share these three buttons, so the active screen decides
     // which one they drive. One gesture to learn, not two.
     case display::ACT_CLK_DOWN:
+#if LED_TEST_ENABLED
+      if (display::screen() == display::UI_LED_TEST) { ledTestStep(-1); break; }
+#endif
       if (display::screen() == display::UI_SET_JUMPNO) jumpStep(-1);
       else                                            clockAdjust(-1);
       break;
     case display::ACT_CLK_UP:
+#if LED_TEST_ENABLED
+      if (display::screen() == display::UI_LED_TEST) { ledTestStep(+1); break; }
+#endif
       if (display::screen() == display::UI_SET_JUMPNO) jumpStep(+1);
       else                                            clockAdjust(+1);
       break;
     case display::ACT_CLK_NEXT:
+#if LED_TEST_ENABLED
+      if (display::screen() == display::UI_LED_TEST)
+      {
+        if (g_ltField < 1) { g_ltField++; ledTestPublish(); }
+        else                 closeLedTest();
+        break;
+      }
+#endif
       if (display::screen() == display::UI_SET_JUMPNO)
       {
         if (g_jdField < 3) { g_jdField++; jumpPublish(); }
@@ -1155,6 +1232,9 @@ void setup()
   // reset lines before anything initialises a peripheral — otherwise the panel
   // and touch controller stay in reset for the whole session. Unconditional:
   // the previous boot may have been a build with the holds enabled.
+#if PIN_LED_PWR >= 0
+  gpio_hold_dis(static_cast<gpio_num_t>(PIN_LED_PWR));
+#endif
   gpio_hold_dis(static_cast<gpio_num_t>(PIN_TOUCH_RST));
   gpio_hold_dis(static_cast<gpio_num_t>(PIN_LCD_RST));
   gpio_deep_sleep_hold_dis();
@@ -1366,6 +1446,10 @@ void setup()
 // Which pattern should the LED and screen be showing right now?
 static LedPattern currentPattern()
 {
+#if LED_TEST_ENABLED
+  if (display::screen() == display::UI_LED_TEST)
+    return {kLedTests[g_ltIdx].c, kLedTests[g_ltIdx].periodMs, g_ltBright};
+#endif
   if (g_failStreak >= SENSOR_FAIL_LIMIT) return led::faultPattern();
 
 #if BENCH_MODE
@@ -1394,6 +1478,7 @@ void loop()
     // deliberate single tap never turns into two, then 150 ms a step and 60 ms
     // once it is clearly a long hold — 59 minutes in about six seconds.
     if (display::screen() == display::UI_SET_CLOCK ||
+        display::screen() == display::UI_LED_TEST ||
         display::screen() == display::UI_SET_JUMPNO)
     {
       int16_t hx, hy;
@@ -1411,6 +1496,10 @@ void loop()
               g_clkRepMs = now;
               g_clkSwallow = true;
               const int dir = (a == display::ACT_CLK_UP) ? +1 : -1;
+#if LED_TEST_ENABLED
+              if (display::screen() == display::UI_LED_TEST) ledTestStep(dir);
+              else
+#endif
               if (display::screen() == display::UI_SET_JUMPNO) jumpStep(dir);
               else                                            clockAdjust(dir);
               MARK_ACTIVE(now, "touch");
@@ -1636,6 +1725,15 @@ void loop()
   }
 
   const LedPattern pattern = currentPattern();
+  // Strip power follows the PATTERN, never the instantaneous colour: a 6 Hz
+  // blink alternates through black, and gating on that would cycle the MOSFET
+  // twelve times a second and pay the rail's settling delay each time. A
+  // steady-black pattern is the only thing that means "nothing to show".
+  {
+    const bool wants = !(pattern.color.r == 0 && pattern.color.g == 0 &&
+                         pattern.color.b == 0);
+    if (wants != led::powered()) led::power(wants);
+  }
   led::render(pattern, now);
 
   // While the demo is playing it owns the screen; the sensor keeps sampling and
