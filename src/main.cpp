@@ -794,20 +794,34 @@ static void handleGesture(const touch::Event &e)
   const uint8_t scr = display::screen();
 
   // Swipes page between the menu screens; they mean nothing on a confirm.
-  if (e.type == touch::EV_SWIPE_LEFT)
+  //
+  // The pages are a ring, not a strip: swiping left off the last one lands on
+  // the first and vice versa. With five pages the logbook is four swipes away
+  // going forwards and one going back, which is the whole point.
   {
-    if (scr == display::UI_MENU)  { display::setScreen(display::UI_MENU2); return; }
-    if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU3); return; }
-    if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU4); return; }
-    if (scr == display::UI_MENU4) { display::setScreen(display::UI_MENU5); return; }
+    static const uint8_t kPages[] = {display::UI_MENU,  display::UI_MENU2,
+                                     display::UI_MENU3, display::UI_MENU4,
+                                     display::UI_MENU5};
+    constexpr int kN = sizeof(kPages) / sizeof(kPages[0]);
+    if (e.type == touch::EV_SWIPE_LEFT || e.type == touch::EV_SWIPE_RIGHT)
+    {
+      for (int i = 0; i < kN; i++)
+      {
+        if (scr != kPages[i]) continue;
+        const int step = (e.type == touch::EV_SWIPE_LEFT) ? 1 : kN - 1;
+        display::setScreen(kPages[(i + step) % kN]);
+        return;
+      }
+    }
   }
-  if (e.type == touch::EV_SWIPE_RIGHT)
+  // The logbook pages on a swipe too, matching the menu ring. BOOT is what
+  // leaves, since every tap in the list already means pick-a-jump or turn-a-page.
+  if (scr == display::UI_LOGBOOK)
   {
-    if (scr == display::UI_MENU5) { display::setScreen(display::UI_MENU4); return; }
-    if (scr == display::UI_MENU4) { display::setScreen(display::UI_MENU3); return; }
-    if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU2); return; }
-    if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU);  return; }
+    if (e.type == touch::EV_SWIPE_LEFT)  { g_lbPage++; logbookPublish(); return; }
+    if (e.type == touch::EV_SWIPE_RIGHT) { if (g_lbPage) g_lbPage--; logbookPublish(); return; }
   }
+
   // Either swipe abandons the edit; that is the only way out without setting.
   if (scr == display::UI_SET_CLOCK &&
       (e.type == touch::EV_SWIPE_LEFT || e.type == touch::EV_SWIPE_RIGHT))

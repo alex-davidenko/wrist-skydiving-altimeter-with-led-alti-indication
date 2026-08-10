@@ -1322,11 +1322,14 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnWide, x, y)) return ACT_LOGBOOK;
       return ACT_CANCEL;
     case UI_LOGBOOK:
+      // Every tap here is picking a jump or turning a page, so a stray one must
+      // not throw the list away — BOOT is the way out. The detail view keeps
+      // tap-to-go-back, where there is nothing else a tap could mean.
       for (uint8_t i = 0; i < 3; i++)
         if (inside(kLbRow[i], x, y)) return (uint8_t)(ACT_LOG_ROW0 + i);
       if (inside(kLbPrev, x, y)) return ACT_LOG_PREV;
       if (inside(kLbNext, x, y)) return ACT_LOG_NEXT;
-      return ACT_CANCEL;
+      return ACT_NONE;
     case UI_JUMP_DETAIL:
       return ACT_LOGBOOK;                 // any tap goes back to the list
     case UI_SET_JUMPNO:
