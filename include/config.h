@@ -476,6 +476,21 @@
 // data behind that. 1500 ms is the shortest window that gave zero false-climb
 // samples on the noisiest flight.
 #define VELOCITY_WINDOW_MS         1500
+// A second, slower window used ONLY for the jump summary. The 1.5 s window is
+// right for driving the display — it has to be responsive — but it swings
+// +-50 m/s in freefall noise, and a single excursion above the freefall exit
+// threshold splits the episode in two. That reported jump 180 opening at
+// 1959 m when a 5 s window puts it at 846 m, alongside 808/1039/1224 on the
+// other three. Fed at a quarter rate so 5 s fits the ring.
+#define SUMMARY_WINDOW_MS          5000
+// Opening is called when the descent has slowed THROUGH this, so it reports
+// where the canopy is flying rather than where the pilot chute was thrown —
+// roughly 50-100 m below the pitch, and a 5 s window lags on top of that. Alex
+// pitched at ~1100 m on jump 179 and was settled by 800; this reports 792.
+// Consistent between jumps, which is what a logbook needs, but it is not the
+// pitch altitude and should not be labelled as one.
+#define SUMMARY_OPEN_MPS           25.0f
+#define SUMMARY_FREEFALL_MPS       35.0f
 
 // Unbuckle reminder during the climb. 500-600 m at ~5 m/s is a 20 s window.
 #define CLIMB_UNBUCKLE_LO_M     500.0f

@@ -105,14 +105,15 @@ static bool     g_inAircraft   = false;
 // always right about: the on-screen readout stays on it only until this proves
 // itself in the air.
 static VelocityWindow g_vwin;
+static VelocityWindow g_swin;      // slow window, summary only
 static JumpDetector   g_jump;
 // Accumulated while recording, written into the file at close.
 static struct {
   float peak, openAlt;
-  uint32_t startMs, peakMs, ffStartMs, ffEndMs;
-  float curExit;
-  uint32_t curStart, bestDur;
-  bool inFF;
+  uint32_t startMs, peakMs, ffEndMs;
+  uint8_t  sub;          // quarter-rate divider for the slow window
+  bool     fastEnough;   // freefall speed was actually reached
+  bool     opened;
 } g_js = {};
 static AircraftLatch  g_latch;
 #endif
@@ -1187,6 +1188,7 @@ void setup()
                  MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
   g_climb.configure(CLIMB_MARK_INTERVAL_M);
   g_vwin.begin(VELOCITY_WINDOW_MS, 96);
+  g_swin.begin(SUMMARY_WINDOW_MS, 80);
   g_jump.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
                 JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
   g_jumpNumber = g_prefs.isKey("jumpno") ? g_prefs.getULong("jumpno") : 1;
@@ -1437,16 +1439,19 @@ void loop()
         // velocity window twitching near the ground during the flare, and not
         // the first, which is a ~1 s blip at exit while the window still holds
         // climb data. Both were tried against real logs; only duration works.
-        if (mode == MODE_FREEFALL && !g_js.inFF)
-        { g_js.inFF = true; g_js.curExit = alt; g_js.curStart = now; }
-        if (mode != MODE_FREEFALL && g_js.inFF)
+        // Opening comes from the slow window, not the phase machine. The fast
+        // one is tuned for the display and a single noise excursion past the
+        // freefall exit threshold splits the episode, which is what put jump
+        // 180's opening at 1959 m instead of 846 m.
+        if (++g_js.sub >= 4)
         {
-          g_js.inFF = false;
-          if (now - g_js.curStart > g_js.bestDur)
+          g_js.sub = 0;
+          const float sv = g_swin.update(alt, now);
+          if (g_swin.ready() && !g_js.opened)
           {
-            g_js.bestDur = now - g_js.curStart;
-            g_js.openAlt = alt;
-            g_js.ffStartMs = g_js.curStart; g_js.ffEndMs = now;
+            if (-sv >= SUMMARY_FREEFALL_MPS) g_js.fastEnough = true;
+            else if (g_js.fastEnough && -sv < SUMMARY_OPEN_MPS)
+            { g_js.opened = true; g_js.openAlt = alt; g_js.ffEndMs = now; }
           }
         }
       }

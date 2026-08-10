@@ -166,6 +166,10 @@ int main(int argc, char **argv)
   float cExit = 0, cMax = 0; uint32_t cStart = 0;
   bool oInFf = false;
 
+  VelocityWindow swin;
+  swin.begin(SUMMARY_WINDOW_MS, 80);
+  uint8_t oSub = 0; bool oFast = false, oOpened = false;
+
   JumpDetector jd;
   jd.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
             JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
@@ -264,6 +268,17 @@ int main(int argc, char **argv)
       // 423 m), and not the first, which is a ~1 s blip at exit while the
       // window still holds climb data. Only duration separates them.
       if (alt > oPeak) { oPeak = alt; oPeakMs = r.tMs; }
+      if (++oSub >= 4)
+      {
+        oSub = 0;
+        const float sv = swin.update(alt, r.tMs);
+        if (swin.ready() && !oOpened)
+        {
+          if (-sv >= SUMMARY_FREEFALL_MPS) oFast = true;
+          else if (oFast && -sv < SUMMARY_OPEN_MPS)
+          { oOpened = true; oOpen = alt; oFfEnd = r.tMs; }
+        }
+      }
       if (ph2 == MODE_FREEFALL && !oInFf)
       { oInFf = true; cExit = alt; cStart = r.tMs; cMax = 0; }
       if (oInFf && -vw > cMax) cMax = -vw;
