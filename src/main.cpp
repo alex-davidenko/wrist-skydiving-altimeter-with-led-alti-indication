@@ -28,6 +28,7 @@
 #include "demo.h"
 #include "display.h"
 #include "flight_mode.h"
+#include "jump_detect.h"
 #include "velocity_window.h"
 #include "ground_ref.h"
 #include "led.h"
@@ -100,6 +101,14 @@ static bool     g_inAircraft   = false;
 // always right about: the on-screen readout stays on it only until this proves
 // itself in the air.
 static VelocityWindow g_vwin;
+static JumpDetector   g_jump;
+static uint32_t       g_jumpNumber = 1;      // next jump to be recorded
+// Accumulated while recording, written into the file at close.
+static struct {
+  float peak, exitAlt, openAlt, maxDescent;
+  uint32_t startMs, ffStartMs, ffEndMs;
+  bool inFF;
+} g_js = {};
 static AircraftLatch  g_latch;
 #endif
 #endif
@@ -1117,6 +1126,9 @@ void setup()
                  MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
   g_climb.configure(CLIMB_MARK_INTERVAL_M);
   g_vwin.begin(VELOCITY_WINDOW_MS, 96);
+  g_jump.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
+                JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
+  g_jumpNumber = g_prefs.isKey("jumpno") ? g_prefs.getULong("jumpno") : 1;
   g_latch.begin(AIRCRAFT_LATCH_ALT_M, AIRCRAFT_CLEAR_ALT_M,
                 AIRCRAFT_DESCENT_CONFIRM_M);
 #endif
@@ -1342,6 +1354,48 @@ void loop()
       // freefall (the jump) or by coming back down low (a ride down).
       const float alt = g_filter.altitude();
       g_inAircraft = g_latch.update(alt, mode);
+
+      // One file per jump. Everything here is flight-only; the bench has no
+      // phase machine and no jumps to detect.
+      const bool wasRec = g_jump.recording();
+      const bool rec = g_jump.update(alt, vwin, mode, now);
+      if (rec && !wasRec)
+      {
+        g_js = {};
+        g_js.startMs = now;
+        g_js.peak = alt;
+        logger::openJump(g_jumpNumber, g_qnhHpa, g_groundPHpa);
+      }
+      if (rec)
+      {
+        if (alt > g_js.peak) g_js.peak = alt;
+        const float desc = -vwin;
+        if (desc > g_js.maxDescent) g_js.maxDescent = desc;
+        if (mode == MODE_FREEFALL && !g_js.inFF)
+        { g_js.inFF = true; g_js.exitAlt = alt; g_js.ffStartMs = now; }
+        if (mode != MODE_FREEFALL && g_js.inFF)
+        { g_js.inFF = false; g_js.openAlt = alt; g_js.ffEndMs = now; }
+      }
+      if (g_jump.justFinished())
+      {
+        logger::Summary sum{};
+        sum.number = g_jumpNumber;
+        sum.peakAltM = g_js.peak;
+        sum.exitAltM = g_js.exitAlt;
+        sum.openAltM = g_js.openAlt;
+        sum.freefallS = g_js.ffEndMs > g_js.ffStartMs
+                          ? (g_js.ffEndMs - g_js.ffStartMs) / 1000.0f : 0.0f;
+        sum.canopyS = g_js.ffEndMs ? (now - g_js.ffEndMs) / 1000.0f : 0.0f;
+        sum.maxDescentMps = g_js.maxDescent;
+        sum.avgClimbMps = g_js.ffStartMs > g_js.startMs
+                            ? g_js.peak / ((g_js.ffStartMs - g_js.startMs) / 1000.0f)
+                            : 0.0f;
+        logger::closeJump(sum);
+        g_jumpNumber++;
+        g_prefs.putULong("jumpno", g_jumpNumber);
+        display::setBanner("JUMP LOGGED", "");
+      }
+      if (g_jump.justAborted()) logger::discardJump();
 
       // UNBUCKLE reminder, shown only on the way up.
       const bool unbuckle = g_inAircraft && mode != MODE_FREEFALL &&

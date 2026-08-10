@@ -28,7 +28,27 @@ namespace logger {
 
 // Mount the card and open a new file. Safe to call with no card inserted —
 // returns false and everything else then no-ops.
+// What a finished jump looks like, written into the file's own header at close
+// so the logbook never has to re-read 60,000 rows to list a jump.
+struct Summary
+{
+  uint32_t number;
+  float peakAltM, exitAltM, openAltM;
+  float freefallS, canopyS;
+  float maxDescentMps, avgClimbMps;
+};
+
+// Mount the card and allocate the ring. Opens no file: one file per jump now,
+// not one per power-up.
 bool begin(float qnhHpa, float groundPHpa);
+
+// Start recording a jump as /JUMPnnnn.CSV.
+bool openJump(uint32_t number, float qnhHpa, float groundPHpa);
+// Finish it, writing the summary into the header block.
+void closeJump(const Summary &s);
+// Abandon it and delete the file — what a drive home gets.
+void discardJump();
+bool recording();
 
 // Spawn the writer task. Call after begin().
 void startTask();
