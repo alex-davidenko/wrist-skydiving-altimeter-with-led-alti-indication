@@ -43,8 +43,10 @@ bool readTail(const char *path, Entry &e)
 
   unsigned num = 0;
   int ex = 0, op = 0;
-  char date[16] = {0};
-  if (sscanf(j, "# jump=%u date=%15s exit_m=%d open_m=%d", &num, date, &ex, &op) != 4)
+  // %10s, matching Entry::date exactly: YYYY-MM-DD plus its terminator. Reading
+  // wider and then copying down would truncate a malformed date silently.
+  char date[11] = {0};
+  if (sscanf(j, "# jump=%u date=%10s exit_m=%d open_m=%d", &num, date, &ex, &op) != 4)
     return false;
   float ff = 0, can = 0, avg = 0, cl = 0;
   if (sscanf(k, "# freefall_s=%f canopy_s=%f avg_freefall_mps=%f avg_climb_mps=%f",
@@ -52,7 +54,8 @@ bool readTail(const char *path, Entry &e)
     return false;
 
   e.number = static_cast<uint16_t>(num);
-  snprintf(e.date, sizeof(e.date), "%s", date);
+  memcpy(e.date, date, sizeof(e.date));
+  e.date[sizeof(e.date) - 1] = '\0';
   e.exitM = static_cast<int16_t>(ex);
   e.openM = static_cast<int16_t>(op);
   e.freefallS = ff; e.canopyS = can;

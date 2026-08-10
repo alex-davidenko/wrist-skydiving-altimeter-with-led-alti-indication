@@ -119,7 +119,7 @@ char     g_lbRow[3][32] = {{0}};
 uint8_t  g_lbPage = 0, g_lbPages = 0;
 uint16_t g_lbTotal = 0;
 char     g_dtTitle[24] = {0};
-char     g_dtLine[5][28] = {{0}};
+char     g_dtLine[5][32] = {{0}};
 uint8_t g_clkActive = 0;
 
 bool inside(const Rect &r, int16_t x, int16_t y)
@@ -716,7 +716,13 @@ void renderUi(const Shared &st)
     {
       char rows[3][32]; uint8_t pg, pgs; uint16_t tot;
       portENTER_CRITICAL(&g_mux);
-      for (int i = 0; i < 3; i++) snprintf(rows[i], sizeof(rows[i]), "%s", g_lbRow[i]);
+      // Fixed-size copy between identical buffers. snprintf here made the
+      // compiler assume the source might not terminate inside its own row.
+      for (int i = 0; i < 3; i++)
+      {
+        memcpy(rows[i], g_lbRow[i], sizeof(rows[i]));
+        rows[i][sizeof(rows[i]) - 1] = '\0';
+      }
       pg = g_lbPage; pgs = g_lbPages; tot = g_lbTotal;
       portEXIT_CRITICAL(&g_mux);
 
@@ -757,10 +763,14 @@ void renderUi(const Shared &st)
     }
     case UI_JUMP_DETAIL:
     {
-      char title[24], lines[5][28];
+      char title[24], lines[5][32];
       portENTER_CRITICAL(&g_mux);
       snprintf(title, sizeof(title), "%s", g_dtTitle);
-      for (int i = 0; i < 5; i++) snprintf(lines[i], sizeof(lines[i]), "%s", g_dtLine[i]);
+      for (int i = 0; i < 5; i++)
+      {
+        memcpy(lines[i], g_dtLine[i], sizeof(lines[i]));
+        lines[i][sizeof(lines[i]) - 1] = '\0';
+      }
       portEXIT_CRITICAL(&g_mux);
 
       g_gfx->setTextSize(2, 2, 0);
@@ -793,7 +803,10 @@ void renderUi(const Shared &st)
       g_gfx->print("JUMPS SO FAR");
 
       char buf[8];
-      snprintf(buf, sizeof(buf), "%d%d%d%d", d[0], d[1], d[2], d[3]);
+      // Each is 0-9 by construction, but the type says int16_t. Reduce to a
+      // char so the bound is in the code rather than only in the invariant.
+      for (int i = 0; i < 4; i++) buf[i] = (char)('0' + (d[i] < 0 ? 0 : d[i] % 10));
+      buf[4] = '\0';
       constexpr int16_t kX = 112, kY = 44, kAdv = 24;
       g_gfx->setTextSize(4, 4, 0);
       g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
@@ -824,7 +837,7 @@ void renderUi(const Shared &st)
       act = g_clkActive;
       portEXIT_CRITICAL(&g_mux);
 
-      char buf[24];
+      char buf[40];
       snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
                f[0], f[1], f[2], f[3], f[4]);
 
@@ -1259,7 +1272,7 @@ void setLogbookPage(const char rows[3][32], uint8_t page, uint8_t pages,
   g_lastScreen = 0xFF;
 }
 
-void setJumpDetail(const char *title, const char lines[5][28])
+void setJumpDetail(const char *title, const char lines[5][32])
 {
   portENTER_CRITICAL(&g_mux);
   snprintf(g_dtTitle, sizeof(g_dtTitle), "%s", title ? title : "");

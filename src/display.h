@@ -95,7 +95,7 @@ void setLogbookPage(const char rows[3][32], uint8_t page, uint8_t pages,
                     uint16_t total);
 // The detail view: a title and five pre-formatted lines. Formatting stays in
 // main.cpp next to the data rather than being reinvented in the renderer.
-void setJumpDetail(const char *title, const char lines[5][28]);
+void setJumpDetail(const char *title, const char lines[5][32]);
 
 // Blank the panel and put the controller to sleep, before deep or light sleep.
 void sleep();

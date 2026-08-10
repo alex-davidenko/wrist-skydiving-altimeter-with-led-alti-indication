@@ -723,7 +723,7 @@ static void openJumpDetail(uint8_t row)
 
   char title[24];
   snprintf(title, sizeof(title), "JUMP %u", e.number);
-  char L[5][28];
+  char L[5][32];
   snprintf(L[0], sizeof(L[0]), "date      %s", e.date);
   snprintf(L[1], sizeof(L[1]), "exit      %d m", e.exitM);
   snprintf(L[2], sizeof(L[2]), "opened    %d m", e.openM);
