@@ -127,6 +127,11 @@
 // Arming is generous and stopping is slow, on purpose: a missed jump cannot be
 // recovered, a spurious file costs a few hundred kB, and a canopy ride passes
 // through low altitude with plenty of speed left.
+// How many jumps the on-device logbook will list. Each entry is read from the
+// tail of its file, so this costs a few hundred bytes of card reads per jump
+// rather than the megabytes the rows would.
+#define LOGBOOK_MAX_ENTRIES   200
+
 #define JUMP_START_ALT_M      50.0f
 #define JUMP_STOP_ALT_M       10.0f
 #define JUMP_FREEFALL_MPS     20.0f

@@ -274,8 +274,16 @@ void closeJump(const Summary &s)
   }
   // Trailing rather than leading: the file is opened before any of this is
   // known, and rewriting a header in place on FAT is not worth the risk.
-  g_file.printf("# jump=%lu exit_m=%.0f open_m=%.0f\n",
-                (unsigned long)s.number, s.peakAltM, s.openAltM);
+  {
+    // Date on the summary line so the logbook can list a jump without opening
+    // the file twice — this is the last line written, so the clock has had the
+    // whole flight to be right.
+    const time_t now = time(nullptr);
+    char d[12] = "0000-00-00";
+    if (now > 1735689600) strftime(d, sizeof(d), "%Y-%m-%d", localtime(&now));
+    g_file.printf("# jump=%lu date=%s exit_m=%.0f open_m=%.0f\n",
+                  (unsigned long)s.number, d, s.peakAltM, s.openAltM);
+  }
   g_file.printf("# freefall_s=%.1f canopy_s=%.1f avg_freefall_mps=%.1f avg_climb_mps=%.1f\n",
                 s.freefallS, s.canopyS, s.avgFreefallMps, s.avgClimbMps);
   g_file.flush();

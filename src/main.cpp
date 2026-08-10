@@ -32,6 +32,7 @@
 #include "velocity_window.h"
 #include "ground_ref.h"
 #include "led.h"
+#include "logbook.h"
 #include "logger.h"
 #include "touch.h"
 #include "usb_msc.h"
@@ -660,6 +661,79 @@ static void jumpCommit()
   closeMenu();
 }
 
+// ---------------------------------------------------------------------------
+//  Logbook
+// ---------------------------------------------------------------------------
+static uint8_t g_lbPage = 0;
+
+// Formatting lives here, next to the data, rather than in the renderer — the
+// renderer takes finished strings so it never has to know what a jump is.
+static void logbookPublish()
+{
+  const uint16_t n = logbook::count();
+  const uint8_t pages = n ? static_cast<uint8_t>((n + 2) / 3) : 1;
+  if (g_lbPage >= pages) g_lbPage = pages ? pages - 1 : 0;
+
+  char rows[3][32] = {{0}};
+  for (uint8_t i = 0; i < 3; i++)
+  {
+    const uint16_t idx = g_lbPage * 3 + i;
+    if (idx >= n) break;
+    const logbook::Entry &e = logbook::at(idx);
+    // "182  9Aug 2817m" — the number first, because that is what a jumper
+    // looks for, and the date short because the panel is 320 px wide.
+    static const char *kMon[12] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                   "Jul","Aug","Sep","Oct","Nov","Dec"};
+    int y = 0, m = 1, d = 1;
+    sscanf(e.date, "%d-%d-%d", &y, &m, &d);
+    if (m < 1 || m > 12) m = 1;
+    snprintf(rows[i], sizeof(rows[i]), "%-4u %2d%s %4dm",
+             e.number, d, kMon[m - 1], e.exitM);
+  }
+  display::setLogbookPage(rows, g_lbPage, pages, n);
+}
+
+static void openLogbook()
+{
+  // Scanning opens every jump file on the card and reads its tail. That is
+  // hundreds of milliseconds at best and seconds on a full card, all of it
+  // blocking the sample loop. Fine on the ground; unthinkable in the air. Same
+  // refusal powerOff() uses, and for the same reason.
+  if (fabsf(g_filter.velocity()) > SLEEP_MAX_VSPEED_MPS ||
+      fabsf(g_filter.altitude()) > JUMP_START_ALT_M)
+  {
+    display::setBanner("NOT WHILE", "FLYING");
+    Serial.println(F("Logbook refused: not while airborne."));
+    delay(1200);
+    closeMenu();
+    return;
+  }
+
+  display::setBanner("READING CARD", "");
+  logbook::scan();
+  g_lbPage = 0;
+  logbookPublish();
+}
+
+static void openJumpDetail(uint8_t row)
+{
+  const uint16_t idx = g_lbPage * 3 + row;
+  if (idx >= logbook::count()) return;
+  const logbook::Entry &e = logbook::at(idx);
+
+  char title[24];
+  snprintf(title, sizeof(title), "JUMP %u", e.number);
+  char L[5][28];
+  snprintf(L[0], sizeof(L[0]), "date      %s", e.date);
+  snprintf(L[1], sizeof(L[1]), "exit      %d m", e.exitM);
+  snprintf(L[2], sizeof(L[2]), "opened    %d m", e.openM);
+  snprintf(L[3], sizeof(L[3]), "freefall  %.0f s at %.0f m/s",
+           e.freefallS, e.avgFreefallMps);
+  snprintf(L[4], sizeof(L[4]), "canopy    %.0f s   climb %.1f m/s",
+           e.canopyS, e.avgClimbMps);
+  display::setJumpDetail(title, L);
+}
+
 static void clockPublish() { display::setClockEdit(g_clk, g_clkField); }
 
 static void openClockEdit()
@@ -725,9 +799,11 @@ static void handleGesture(const touch::Event &e)
     if (scr == display::UI_MENU)  { display::setScreen(display::UI_MENU2); return; }
     if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU3); return; }
     if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU4); return; }
+    if (scr == display::UI_MENU4) { display::setScreen(display::UI_MENU5); return; }
   }
   if (e.type == touch::EV_SWIPE_RIGHT)
   {
+    if (scr == display::UI_MENU5) { display::setScreen(display::UI_MENU4); return; }
     if (scr == display::UI_MENU4) { display::setScreen(display::UI_MENU3); return; }
     if (scr == display::UI_MENU3) { display::setScreen(display::UI_MENU2); return; }
     if (scr == display::UI_MENU2) { display::setScreen(display::UI_MENU);  return; }
@@ -781,6 +857,18 @@ static void handleGesture(const touch::Event &e)
       break;
     case display::ACT_CLOCK:    openClockEdit(); break;
     case display::ACT_JUMPNO:   openJumpEdit(); break;
+    case display::ACT_LOGBOOK:
+      // From the menu this means "open the logbook" and has to read the card.
+      // From the detail view it means "back to the list", which must not — a
+      // rescan there would cost a second and lose your place.
+      if (display::screen() == display::UI_JUMP_DETAIL) logbookPublish();
+      else                                              openLogbook();
+      break;
+    case display::ACT_LOG_ROW0: openJumpDetail(0); break;
+    case display::ACT_LOG_ROW1: openJumpDetail(1); break;
+    case display::ACT_LOG_ROW2: openJumpDetail(2); break;
+    case display::ACT_LOG_PREV: if (g_lbPage) { g_lbPage--; logbookPublish(); } break;
+    case display::ACT_LOG_NEXT: g_lbPage++; logbookPublish(); break;
     // Both editors share these three buttons, so the active screen decides
     // which one they drive. One gesture to learn, not two.
     case display::ACT_CLK_DOWN:

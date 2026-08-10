@@ -41,6 +41,9 @@ enum UiScreen : uint8_t
   UI_MENU4,            // page 4: SET CLOCK
   UI_SET_CLOCK,        // the field editor itself
   UI_SET_JUMPNO,       // same editor, four digits, your jump total
+  UI_MENU5,            // page 5: LOGBOOK
+  UI_LOGBOOK,          // list of jumps read off the card
+  UI_JUMP_DETAIL,      // one jump's numbers
   UI_CONFIRM_ZERO,
   UI_CONFIRM_UNMOUNT,
   UI_CONFIRM_USB,
@@ -61,6 +64,12 @@ enum UiAction : uint8_t
   ACT_CONFIRM,
   ACT_CLOCK,           // open the clock editor
   ACT_JUMPNO,          // open the jump-number editor
+  ACT_LOGBOOK,         // open the logbook
+  ACT_LOG_ROW0,        // tap a row in the list
+  ACT_LOG_ROW1,
+  ACT_LOG_ROW2,
+  ACT_LOG_PREV,
+  ACT_LOG_NEXT,
   ACT_CLK_DOWN,
   ACT_CLK_UP,
   ACT_CLK_NEXT
@@ -79,6 +88,14 @@ void setClockEdit(const int16_t *f5, uint8_t active);
 // Four digits, most significant first. Shares the clock editor's buttons and
 // its ACT_CLK_* actions — same gesture, so there is one thing to learn.
 void setJumpEdit(const int16_t *d4, uint8_t active);
+
+// One page of the logbook. `rows` are three pre-formatted lines, empty for a
+// slot with nothing in it; `page`/`pages` drive the footer.
+void setLogbookPage(const char rows[3][32], uint8_t page, uint8_t pages,
+                    uint16_t total);
+// The detail view: a title and five pre-formatted lines. Formatting stays in
+// main.cpp next to the data rather than being reinvented in the renderer.
+void setJumpDetail(const char *title, const char lines[5][28]);
 
 // Blank the panel and put the controller to sleep, before deep or light sleep.
 void sleep();

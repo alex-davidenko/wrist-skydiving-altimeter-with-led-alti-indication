@@ -308,7 +308,8 @@ int main(int argc, char **argv)
       const double ffS = (oFfEnd > oPeakMs) ? (oFfEnd - oPeakMs) / 1000.0 : 0.0;
       const double canS = oFfEnd ? (r.tMs - oFfEnd) / 1000.0 : 0.0;
       const double climbS = (oPeakMs > jdStartMs) ? (oPeakMs - jdStartMs) / 1000.0 : 0.0;
-      fprintf(out, "# jump=%u exit_m=%.0f open_m=%.0f\n", outNum, oPeak, oOpen);
+      fprintf(out, "# jump=%u date=%s exit_m=%.0f open_m=%.0f\n",
+              outNum, (argc > 4 ? argv[4] : "0000-00-00"), oPeak, oOpen);
       fprintf(out, "# freefall_s=%.1f canopy_s=%.1f avg_freefall_mps=%.1f avg_climb_mps=%.1f\n",
               ffS, canS, ffS > 1.0 ? (oPeak - oOpen) / ffS : 0.0,
               climbS > 0 ? oPeak / climbS : 0.0);

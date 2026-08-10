@@ -99,12 +99,27 @@ constexpr Rect kBtnRight = {168, 40, 132,  95};
 constexpr Rect kBtnWide  = { 60, 40, 200,  95};   // single-button pages
 
 // Clock editor: three controls along the bottom, value above them.
+// Three list rows, then a footer with prev/next. Rows are wide and tall
+// because they are tapped with a gloved thumb, not a stylus.
+constexpr Rect kLbRow[3] = {{ 10, 30, 300, 34},
+                            { 10, 66, 300, 34},
+                            { 10,102, 300, 34}};
+constexpr Rect kLbPrev = {  6,140,  90, 28};
+constexpr Rect kLbNext = {224,140,  90, 28};
+
 constexpr Rect kClkDown = { 20, 96,  80, 54};
 constexpr Rect kClkNext = {120, 96,  80, 54};
 constexpr Rect kClkUp   = {220, 96,  80, 54};
 
 // Published from the loop. Guarded by the same spinlock as the sample state.
 int16_t g_clkF[5]   = {2026, 1, 1, 0, 0};
+
+// Logbook page, formatted by main.cpp and copied here under the spinlock.
+char     g_lbRow[3][32] = {{0}};
+uint8_t  g_lbPage = 0, g_lbPages = 0;
+uint16_t g_lbTotal = 0;
+char     g_dtTitle[24] = {0};
+char     g_dtLine[5][28] = {{0}};
 uint8_t g_clkActive = 0;
 
 bool inside(const Rect &r, int16_t x, int16_t y)
@@ -663,7 +678,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_GREEN,  "ZERO",  "HERE");
       drawButton(kBtnRight, RGB565_ORANGE, "POWER", "OFF");
-      drawPager(0, 4);
+      drawPager(0, 5);
       break;
 
     case UI_MENU2:
@@ -671,7 +686,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_BLUE,  "UNMOUNT", "CARD");
       drawButton(kBtnRight, RGB565_GREEN, "DEMO",    "JUMP");
-      drawPager(1, 4);
+      drawPager(1, 5);
       break;
 
     case UI_MENU3:
@@ -680,7 +695,7 @@ void renderUi(const Shared &st)
       drawButton(kBtnLeft,  RGB565_BLUE,   "USB",   "DRIVE");
       drawButton(kBtnRight, RGB565_ORANGE, "UNITS",
                  st.feet ? "ft -> m" : "m -> ft");
-      drawPager(2, 4);
+      drawPager(2, 5);
       break;
 
     case UI_MENU4:
@@ -688,9 +703,81 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_BLUE, "SET", "CLOCK");
       drawButton(kBtnRight, RGB565_BLUE, "JUMP", "No.");
-      drawPager(3, 4);
+      drawPager(3, 5);
+      break;
+    case UI_MENU5:
+      g_gfx->setCursor(20, 12);
+      g_gfx->print("MENU");
+      drawButton(kBtnWide, RGB565_GREEN, "LOG", "BOOK");
+      drawPager(4, 5);
       break;
 
+    case UI_LOGBOOK:
+    {
+      char rows[3][32]; uint8_t pg, pgs; uint16_t tot;
+      portENTER_CRITICAL(&g_mux);
+      for (int i = 0; i < 3; i++) snprintf(rows[i], sizeof(rows[i]), "%s", g_lbRow[i]);
+      pg = g_lbPage; pgs = g_lbPages; tot = g_lbTotal;
+      portEXIT_CRITICAL(&g_mux);
+
+      g_gfx->setTextSize(1, 1, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(10, 12);
+      char hdr[32];
+      snprintf(hdr, sizeof(hdr), "LOGBOOK  %u jump%s", tot, tot == 1 ? "" : "s");
+      g_gfx->print(hdr);
+
+      for (int i = 0; i < 3; i++)
+      {
+        if (!rows[i][0]) continue;
+        g_gfx->fillRoundRect(kLbRow[i].x, kLbRow[i].y, kLbRow[i].w, kLbRow[i].h,
+                             4, RGB565_DARKGREY);
+        g_gfx->setTextSize(2, 2, 0);
+        g_gfx->setTextColor(RGB565_WHITE, RGB565_DARKGREY);
+        g_gfx->setCursor(kLbRow[i].x + 8, kLbRow[i].y + 10);
+        g_gfx->print(rows[i]);
+      }
+
+      g_gfx->setTextSize(1, 1, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      if (pgs > 1)
+      {
+        if (pg > 0)        { g_gfx->setCursor(kLbPrev.x + 8, kLbPrev.y + 10); g_gfx->print("< NEWER"); }
+        if (pg + 1 < pgs)  { g_gfx->setCursor(kLbNext.x + 8, kLbNext.y + 10); g_gfx->print("OLDER >"); }
+        char f[16]; snprintf(f, sizeof(f), "%u/%u", pg + 1, pgs);
+        g_gfx->setCursor(150, kLbPrev.y + 10); g_gfx->print(f);
+      }
+      if (!tot)
+      {
+        g_gfx->setTextSize(2, 2, 0);
+        g_gfx->setCursor(40, 70);
+        g_gfx->print("no jumps yet");
+      }
+      break;
+    }
+    case UI_JUMP_DETAIL:
+    {
+      char title[24], lines[5][28];
+      portENTER_CRITICAL(&g_mux);
+      snprintf(title, sizeof(title), "%s", g_dtTitle);
+      for (int i = 0; i < 5; i++) snprintf(lines[i], sizeof(lines[i]), "%s", g_dtLine[i]);
+      portEXIT_CRITICAL(&g_mux);
+
+      g_gfx->setTextSize(2, 2, 0);
+      g_gfx->setTextColor(RGB565_YELLOW, RGB565_BLACK);
+      g_gfx->setCursor(10, 10);
+      g_gfx->print(title);
+      g_gfx->setTextSize(1, 1, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      for (int i = 0; i < 5; i++)
+      {
+        g_gfx->setCursor(14, 44 + i * 22);
+        g_gfx->print(lines[i]);
+      }
+      g_gfx->setCursor(14, 158);
+      g_gfx->print("tap to go back");
+      break;
+    }
     case UI_SET_JUMPNO:
     {
       int16_t d[4];
@@ -1161,6 +1248,27 @@ uint8_t screen()
   return s;
 }
 
+void setLogbookPage(const char rows[3][32], uint8_t page, uint8_t pages,
+                    uint16_t total)
+{
+  portENTER_CRITICAL(&g_mux);
+  for (int i = 0; i < 3; i++) snprintf(g_lbRow[i], sizeof(g_lbRow[i]), "%s", rows[i]);
+  g_lbPage = page; g_lbPages = pages; g_lbTotal = total;
+  g_shared.screen = UI_LOGBOOK;
+  portEXIT_CRITICAL(&g_mux);
+  g_lastScreen = 0xFF;
+}
+
+void setJumpDetail(const char *title, const char lines[5][28])
+{
+  portENTER_CRITICAL(&g_mux);
+  snprintf(g_dtTitle, sizeof(g_dtTitle), "%s", title ? title : "");
+  for (int i = 0; i < 5; i++) snprintf(g_dtLine[i], sizeof(g_dtLine[i]), "%s", lines[i]);
+  g_shared.screen = UI_JUMP_DETAIL;
+  portEXIT_CRITICAL(&g_mux);
+  g_lastScreen = 0xFF;
+}
+
 void setJumpEdit(const int16_t *d4, uint8_t active)
 {
   portENTER_CRITICAL(&g_mux);
@@ -1210,6 +1318,17 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnLeft, x, y))  return ACT_CLOCK;
       if (inside(kBtnRight, x, y)) return ACT_JUMPNO;
       return ACT_CANCEL;
+    case UI_MENU5:
+      if (inside(kBtnWide, x, y)) return ACT_LOGBOOK;
+      return ACT_CANCEL;
+    case UI_LOGBOOK:
+      for (uint8_t i = 0; i < 3; i++)
+        if (inside(kLbRow[i], x, y)) return (uint8_t)(ACT_LOG_ROW0 + i);
+      if (inside(kLbPrev, x, y)) return ACT_LOG_PREV;
+      if (inside(kLbNext, x, y)) return ACT_LOG_NEXT;
+      return ACT_CANCEL;
+    case UI_JUMP_DETAIL:
+      return ACT_LOGBOOK;                 // any tap goes back to the list
     case UI_SET_JUMPNO:
     case UI_SET_CLOCK:
       // No cancel-by-tapping-elsewhere here: every stray tap during a fiddly
