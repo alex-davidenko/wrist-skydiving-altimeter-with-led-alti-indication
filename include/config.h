@@ -16,7 +16,7 @@
 // The scheme: 1.0.0 is reserved for the first firmware that has actually
 // flown and been checked against a reference altimeter. Everything before
 // that is 0.x, however finished it looks on a desk.
-#define FW_VERSION "0.9.0"
+#define FW_VERSION "0.10.0"
 
 // ===========================================================================
 //  MODE
