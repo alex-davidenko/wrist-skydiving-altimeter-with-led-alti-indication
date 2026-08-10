@@ -83,3 +83,37 @@ private:
   float   _interval = 100.0f;
   int32_t _lastBand = 0;
 };
+
+// Are we still riding up in the aircraft?
+//
+// This exists because it decides the colour before the zone is ever consulted:
+// led::flightPattern() paints blue for "in aircraft" regardless of altitude, so
+// a latch stuck on hides the entire ladder. On jump 1 that made 58% of the
+// descent blue while the zone ladder underneath was perfectly correct.
+//
+// It cannot key off vertical speed alone. A 1.5 s window still holds climb data
+// for a moment after exit, and under canopy a riser input or a thermal is a
+// genuine brief climb — either re-armed the old latch, which then held for
+// hundreds of metres because it only released on FREEFALL or below 100 m.
+//
+// So the rule is altitude trend, Alex's suggestion: you cannot be riding up
+// while you are `descendConfirmM` below where you just were. That both blocks
+// re-arming and clears an armed latch, and unlike keying off FREEFALL it also
+// covers a hop-and-pop that never reaches freefall speed.
+class AircraftLatch
+{
+ public:
+  void begin(float latchAltM, float clearAltM, float descendConfirmM);
+  void reset();
+
+  // Feed the current altitude and phase each sample. Returns the latch state.
+  bool update(float altitudeM, uint8_t mode);
+
+  bool inAircraft() const { return _in; }
+  float peak() const { return _peak; }
+
+ private:
+  float _latchAlt = 300.0f, _clearAlt = 100.0f, _confirm = 150.0f;
+  float _peak = -1e9f;
+  bool  _in = false;
+};

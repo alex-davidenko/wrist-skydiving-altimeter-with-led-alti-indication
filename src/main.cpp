@@ -28,6 +28,7 @@
 #include "demo.h"
 #include "display.h"
 #include "flight_mode.h"
+#include "velocity_window.h"
 #include "ground_ref.h"
 #include "led.h"
 #include "logger.h"
@@ -92,6 +93,15 @@ static const char *g_activeWho = "boot";
 // on jump run drops vertical speed below the climb threshold, the phase machine
 // calls it CANOPY, and the screen blanks moments before exit.
 static bool     g_inAircraft   = false;
+#if !BENCH_MODE
+// Vertical speed for the phase machine, from a window of altitude rather than
+// the Kalman velocity state — see velocity_window.h for the flight data behind
+// that. The filter's own velocity is still used for everything else it was
+// always right about: the on-screen readout stays on it only until this proves
+// itself in the air.
+static VelocityWindow g_vwin;
+static AircraftLatch  g_latch;
+#endif
 #endif
 
 // ---------------------------------------------------------------------------
@@ -1063,6 +1073,9 @@ void setup()
   g_modes.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
                  MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
   g_climb.configure(CLIMB_MARK_INTERVAL_M);
+  g_vwin.begin(VELOCITY_WINDOW_MS, 96);
+  g_latch.begin(AIRCRAFT_LATCH_ALT_M, AIRCRAFT_CLEAR_ALT_M,
+                AIRCRAFT_DESCENT_CONFIRM_M);
 #endif
 
 #if BOOT_ZERO_ENABLED
@@ -1103,6 +1116,8 @@ void setup()
 #endif
 #if !BENCH_MODE
   g_landing.reset(g_rawAglM);
+  g_vwin.reset();
+  g_latch.reset();
   g_modes.reset(MODE_CANOPY);
   g_climb.update(g_rawAglM, false);
 #endif
@@ -1265,7 +1280,14 @@ void loop()
       // the LED. Otherwise a tracker goes stale while idle and shows a wrong
       // band for a moment when its mode comes back.
       g_landing.update(g_filter.altitude(), now);
-      const FlightMode mode = g_modes.update(g_filter.velocity(), now);
+      // Windowed velocity, not g_filter.velocity(). In freefall the latter
+      // degenerates to the difference of adjacent noisy samples and read up to
+      // 2326 m/s across four logged jumps, with 38-45% of freefall samples
+      // reporting a CLIMB.
+      const float vwin = g_vwin.update(g_filter.altitude(), now);
+      const FlightMode mode = g_vwin.ready()
+                                ? g_modes.update(vwin, now)
+                                : g_modes.mode();
       if (g_climb.update(g_filter.altitude(), mode == MODE_CLIMB))
       {
         led::flashOnce(led::kGreen, CLIMB_FLASH_MS, now);
@@ -1274,8 +1296,7 @@ void loop()
       // Aircraft latch: set by a climb well clear of the ground, released by
       // freefall (the jump) or by coming back down low (a ride down).
       const float alt = g_filter.altitude();
-      if (mode == MODE_CLIMB && alt > AIRCRAFT_LATCH_ALT_M) g_inAircraft = true;
-      if (mode == MODE_FREEFALL || alt < AIRCRAFT_CLEAR_ALT_M) g_inAircraft = false;
+      g_inAircraft = g_latch.update(alt, mode);
 
       // UNBUCKLE reminder, shown only on the way up.
       const bool unbuckle = g_inAircraft && mode != MODE_FREEFALL &&

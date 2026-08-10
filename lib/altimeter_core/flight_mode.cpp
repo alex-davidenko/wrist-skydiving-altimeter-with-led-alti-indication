@@ -88,3 +88,30 @@ bool ClimbMarker::update(float altitude, bool climbing)
   }
   return false;
 }
+
+void AircraftLatch::begin(float latchAltM, float clearAltM, float descendConfirmM)
+{
+  _latchAlt = latchAltM;
+  _clearAlt = clearAltM;
+  _confirm  = descendConfirmM;
+  reset();
+}
+
+void AircraftLatch::reset()
+{
+  _peak = -1e9f;
+  _in   = false;
+}
+
+bool AircraftLatch::update(float altitudeM, uint8_t mode)
+{
+  if (altitudeM > _peak) _peak = altitudeM;
+  // Back on the ground: forget the peak, so the next climb starts clean.
+  if (altitudeM < _clearAlt) _peak = altitudeM;
+
+  const bool descending = altitudeM < _peak - _confirm;
+
+  if (mode == MODE_CLIMB && altitudeM > _latchAlt && !descending) _in = true;
+  if (mode == MODE_FREEFALL || altitudeM < _clearAlt || descending) _in = false;
+  return _in;
+}

@@ -153,11 +153,10 @@ int main(int argc, char **argv)
   FlightModeTracker modes2;
   modes2.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
                 MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
-  bool inAircraft2 = false;
+  AircraftLatch latch2;
+  latch2.begin(AIRCRAFT_LATCH_ALT_M, AIRCRAFT_CLEAR_ALT_M, AIRCRAFT_DESCENT_CONFIRM_M);
   size_t scrZone2 = 0, scrBlue2 = 0, scrLadder2 = 0;
   size_t rearm = 0, rearm2 = 0;
-  float peakAlt = -1e9f;    // highest altitude since the last time we were low
-  float rearmAltLo = 1e9f, rearmAltHi = -1e9f;
   // What flightPattern() would have painted, counted over the descent only.
   size_t scrZone = 0, scrBlue = 0, scrLadder = 0;
   bool descending = false;
@@ -224,22 +223,8 @@ int main(int argc, char **argv)
     else if (r.filtM < apogee - 50.0f) descending = true;
     const float vw = vwin.update(filt.altitude(), r.tMs);
     const uint8_t ph2 = vwin.ready() ? modes2.update(vw, r.tMs) : (uint8_t)MODE_CANOPY;
-    if (alt > peakAlt) peakAlt = alt;
-    if (alt < AIRCRAFT_CLEAR_ALT_M) peakAlt = alt;
-    const bool descendingFromPeak = alt < peakAlt - AIRCRAFT_DESCENT_CONFIRM_M;
-    // Alex's rule, and it is the better one: you cannot be riding up in an
-    // aircraft while your altitude is well below where it just was. A single
-    // committed CLIMB — a riser input, a thermal, or the window still holding
-    // climb data seconds after exit — must not re-arm the latch once the trend
-    // is clearly down. Keyed off the peak rather than off FREEFALL, so it also
-    // covers a hop-and-pop that never reaches freefall speed at all.
-    if (ph2 == MODE_CLIMB && alt > AIRCRAFT_LATCH_ALT_M && !descendingFromPeak)
-    { if (descending && !inAircraft2) { rearm2++; if (alt<rearmAltLo) rearmAltLo=alt; if (alt>rearmAltHi) rearmAltHi=alt; } inAircraft2 = true; }
-    // Descending clears it outright, not merely blocks re-arming: otherwise a
-    // hop-and-pop that never reaches freefall speed keeps the latch set from
-    // the climb all the way down to AIRCRAFT_CLEAR_ALT_M.
-    if (ph2 == MODE_FREEFALL || alt < AIRCRAFT_CLEAR_ALT_M || descendingFromPeak)
-      inAircraft2 = false;
+    const bool inAircraft2 = latch2.update(alt, ph2);
+    if (descending && !inAircraft2 && latch2.inAircraft()) rearm2++;
 
     if (descending && alt > 5.0f)
     {
@@ -317,7 +302,6 @@ int main(int argc, char **argv)
       printf("  blue (climb/in-aircraft) : %5.1f%%\n", 100.0 * scrBlue2 / tot);
       printf("  landing ladder : %5.1f%%\n", 100.0 * scrLadder2 / tot);
       printf("  aircraft-latch re-arms during descent: %zu (old) -> %zu (new)", rearm, rearm2);
-      if (rearm2) printf(", between %.0f and %.0f m", rearmAltLo, rearmAltHi);
       printf("\n\n");
     }
   }
