@@ -1005,9 +1005,14 @@ void renderFrame(const Shared &st)
   // foot digit changes 164 times a second, which is unreadable, and rounding is
   // what production altimeters do. Above 9999 ft the Viso form "12.3K" is used
   // instead of a fifth digit, so the digits stay large rather than shrinking.
-  // One display step is 1 m, or 10 ft — feet are rounded to 10 because at
-  // 50 m/s the foot digit changes 164 times a second and is unreadable.
-  const float step = st.feet ? 10.0f : 1.0f;
+  // One display step is 5 m, or 10 ft. Both are rounded for the same reason:
+  // at 50 m/s a 1 m digit changes 50 times a second and a 1 ft digit 164 times,
+  // and neither is readable. 5 m is finer than 10 ft, so metres stay the more
+  // precise of the two, as they were.
+  //
+  // BENCH keeps 1 m, because the whole bench range is 0-2 m and a 5 m step
+  // would show a constant zero.
+  const float step = st.feet ? 10.0f : (BENCH_MODE ? 1.0f : 5.0f);
   const float val  = st.feet ? st.altM * METRES_TO_FEET : st.altM;
   g_lastAltN = roundSticky(val / step, g_lastAltN);
   const int32_t alt = g_lastAltN * (int32_t)step;
@@ -1079,16 +1084,17 @@ void renderFrame(const Shared &st)
   }
   else
   {
-    // Vertical speed, quantised to 0.1 m/s so it is not redrawn every frame.
-    // ft/s with feet, m/s with metres. Integer ft/s is 0.3 m/s of resolution,
-    // which is finer than anything the reading is used for.
+    // Whole units in both systems, and quantised to exactly what is shown so
+    // the strip repaints only when the text changes. A tenth of a m/s was
+    // never readable at 50 m/s and only made the digits churn; ft/s is 0.3 m/s
+    // of resolution, which is already finer than the reading is used for.
     const int32_t vs = st.feet ? (int32_t)lrintf(st.vsMps * METRES_TO_FEET)
-                               : (int32_t)lrintf(st.vsMps * 10.0f);
+                               : (int32_t)lrintf(st.vsMps);
     if (vs != g_lastVs)
     {
       char vbuf[20];
       if (st.feet) snprintf(vbuf, sizeof(vbuf), "%+4ld ft/s", (long)vs);
-      else         snprintf(vbuf, sizeof(vbuf), "%+6.1f m/s", vs / 10.0f);
+      else         snprintf(vbuf, sizeof(vbuf), "%+4ld m/s", (long)vs);
       g_gfx->setFont(NULL);
       g_gfx->setTextColor(ink, bg);
       g_gfx->setTextSize(2, 2, 0);
@@ -1121,16 +1127,20 @@ void renderFrame(const Shared &st)
   // displayed text changes.
 #if BATTERY_SCREEN_DECIMALS >= 3
   const int32_t bv = (int32_t)lrintf(st.battV * 1000.0f);
-#else
+#elif BATTERY_SCREEN_DECIMALS == 2
   const int32_t bv = (int32_t)lrintf(st.battV * 100.0f);
+#else
+  const int32_t bv = (int32_t)lrintf(st.battV * 10.0f);
 #endif
   if (bv != g_lastBatt)
   {
     char bbuf[12];
 #if BATTERY_SCREEN_DECIMALS >= 3
     snprintf(bbuf, sizeof(bbuf), "%.3f", bv / 1000.0f);   // no "V": same width
-#else
+#elif BATTERY_SCREEN_DECIMALS == 2
     snprintf(bbuf, sizeof(bbuf), "%.2fV", bv / 100.0f);
+#else
+    snprintf(bbuf, sizeof(bbuf), "%.1fV", bv / 10.0f);
 #endif
     g_gfx->setFont(NULL);
     g_gfx->setTextColor(ink, bg);
