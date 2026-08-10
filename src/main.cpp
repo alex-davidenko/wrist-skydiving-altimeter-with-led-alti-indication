@@ -548,6 +548,12 @@ static void powerOff()
 
   holdPeripheralsForDeepSleep();
 
+  // Wake sources are global in ESP-IDF and survive between sleeps. Idle light
+  // sleep arms a 30 s timer every time it runs, and nothing ever cleared it —
+  // so this "power off" inherited it and woke 30 s later with nothing pressed,
+  // then booted and stayed up. Power-off has only ever been genuine on a device
+  // that had not idled once since boot.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
   esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(PIN_BUTTON), 0);
   esp_deep_sleep_start();
 }
