@@ -123,6 +123,23 @@ static void saveCalibration()
   g_prefs.putFloat("groundP", g_groundPHpa);
 }
 
+// The RST button drives EN/CHIP_PU on this board, which powers down the RTC
+// domain — so a physical reset loses the clock exactly as a battery pull would,
+// and coming back from USB drive mode always goes through one. Entering USB
+// mode is a software reset and keeps the time; leaving it cannot.
+//
+// So the clock is mirrored into NVS. Cheap because it is rate limited: NVS is
+// flash, and writing every second would wear it out for no benefit.
+static uint32_t g_clockSavedMs = 0;
+
+static void saveClock()
+{
+  const time_t now = time(nullptr);
+  if (now < 1735689600) return;            // 2025-01-01; refuse to store junk
+  g_prefs.putULong("clock", static_cast<uint32_t>(now));
+  g_clockSavedMs = millis();
+}
+
 static void loadCalibration()
 {
   // isKey() first: reading a missing key works fine but logs an ESP-IDF error,
@@ -632,6 +649,7 @@ static void clockCommit()
   t.tm_isdst = -1;
   const struct timeval tv = {mktime(&t), 0};
   settimeofday(&tv, nullptr);
+  saveClock();
   Serial.printf("\nClock set: %04d-%02d-%02d %02d:%02d\n",
                 g_clk[0], g_clk[1], g_clk[2], g_clk[3], g_clk[4]);
   display::setBanner("CLOCK SET", "");
@@ -697,6 +715,7 @@ static void handleGesture(const touch::Event &e)
         // Close the log first: the host is about to own this filesystem, and
         // two writers on one FAT corrupt it.
         logger::close();
+        saveClock();                      // the RST out of USB mode loses the RTC
         display::setBanner("REBOOTING", "to USB drive");
         delay(800);
         usbmsc::rebootIntoMode();          // does not return
@@ -993,6 +1012,9 @@ void setup()
     Serial.printf("Reset reason : %s\n", g_resetReason);
   }
 
+  // NVS first: the clock restore below reads from it.
+  g_prefs.begin("altimeter", false);
+
   // The board has no battery-backed clock and no network, so on a cold start
   // it believes it is 1980 — which is what FAT then stamps on every log file.
   // Seed from the firmware build time so files at least land in the right week,
@@ -1009,11 +1031,27 @@ void setup()
     bt.tm_min  = atoi(__TIME__ + 3);
     bt.tm_sec  = atoi(__TIME__ + 6);
     const time_t built = mktime(&bt);
-    if (time(nullptr) < built)
+
+    // Plausibility, not "earlier than the build". The old test clobbered any
+    // correctly set time that happened to predate the firmware — which is every
+    // time you set the clock on a build compiled yesterday.
+    const bool haveClock = time(nullptr) >= 1735689600;   // 2025-01-01
+    if (!haveClock)
     {
-      const struct timeval tv = {built, 0};
-      settimeofday(&tv, nullptr);
-      Serial.printf("Clock seeded from build time; 'w <unix>' to set exactly.\n");
+      const uint32_t saved = g_prefs.isKey("clock") ? g_prefs.getULong("clock") : 0;
+      if (saved >= 1735689600)
+      {
+        const struct timeval tv = {static_cast<time_t>(saved), 0};
+        settimeofday(&tv, nullptr);
+        Serial.printf("Clock restored from flash; it will be up to %d min slow.\n",
+                      CLOCK_SAVE_INTERVAL_MS / 60000);
+      }
+      else
+      {
+        const struct timeval tv = {built, 0};
+        settimeofday(&tv, nullptr);
+        Serial.println(F("Clock seeded from build time; set it in MENU or with 'w'."));
+      }
     }
   }
   Serial.println(F("NOT A SAFETY DEVICE — secondary visual aid only."));
@@ -1063,7 +1101,6 @@ void setup()
   // boot zero below costs no extra waiting.
   g_filterSettledMs = millis() + BOOT_ZERO_SETTLE_MS;
 
-  g_prefs.begin("altimeter", false);
   loadCalibration();
 
   g_filter.configureAdaptive(FILTER_GATE_SIGMA, FILTER_MAX_INFLATE);
@@ -1168,6 +1205,8 @@ void loop()
 
   pollSerial();
   pollButton(now);
+
+  if ((uint32_t)(now - g_clockSavedMs) >= CLOCK_SAVE_INTERVAL_MS) saveClock();
 
   if (touch::available())
   {

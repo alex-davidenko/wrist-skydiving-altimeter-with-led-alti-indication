@@ -117,6 +117,12 @@
 // warm-up excursion measured to finish by 1.3 s — so the wait costs nothing on
 // top of the graphics. Anything left over is what the weather-drift correction
 // exists to clean up.
+// How often the wall clock is mirrored to NVS. The RST button cuts EN on this
+// board, taking the RTC domain with it, so without this the clock resets to the
+// firmware build date every time you come back from USB drive mode. Worst-case
+// loss on a reset is one interval.
+#define CLOCK_SAVE_INTERVAL_MS  300000
+
 #define BOOT_ZERO_ENABLED     1
 #define BOOT_ZERO_SETTLE_MS   3000
 
