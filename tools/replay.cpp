@@ -25,6 +25,7 @@
 #include "altitude_filter.h"
 #include "baro_math.h"
 #include "flight_mode.h"
+#include "jump_detect.h"
 #include "velocity_window.h"
 #include "flight_mode.h"
 #include "zones.h"
@@ -153,6 +154,14 @@ int main(int argc, char **argv)
   FlightModeTracker modes2;
   modes2.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
                 MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+  JumpDetector jd;
+  jd.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
+            JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
+  bool jdWas = false;
+  size_t jdRows = 0, jdFiles = 0;
+  uint32_t jdStartMs = 0;
+  float jdStartAlt = 0;
+
   AircraftLatch latch2;
   latch2.begin(AIRCRAFT_LATCH_ALT_M, AIRCRAFT_CLEAR_ALT_M, AIRCRAFT_DESCENT_CONFIRM_M);
   size_t scrZone2 = 0, scrBlue2 = 0, scrLadder2 = 0;
@@ -226,6 +235,18 @@ int main(int argc, char **argv)
     const bool inAircraft2 = latch2.update(alt, ph2);
     if (descending && !inAircraft2 && latch2.inAircraft()) rearm2++;
 
+    const bool jrec = jd.update(alt, vw, ph2, r.tMs);
+    if (jrec) jdRows++;
+    if (jrec && !jdWas) { jdStartMs = r.tMs; jdStartAlt = alt; jdFiles++; }
+    if (jd.justAborted())
+      printf("  discarded a recording that never saw freefall (t=%.0f..%.0f s)\n",
+             jdStartMs / 1000.0, r.tMs / 1000.0);
+    if (jd.justFinished())
+      printf("  jump %zu: t=%.0f..%.0f s, %.0f m -> %.0f m, peak %.0f m, %.1f min\n",
+             jdFiles, jdStartMs / 1000.0, r.tMs / 1000.0, jdStartAlt, alt,
+             jd.peakAltM(), (r.tMs - jdStartMs) / 60000.0);
+    jdWas = jrec;
+
     if (descending && alt > 5.0f)
     {
       // Same order of tests as led::flightPattern().
@@ -255,6 +276,10 @@ int main(int argc, char **argv)
   std::sort(filtErr.begin(), filtErr.end());
   const double p999 = filtErr.empty() ? 0.0
                     : filtErr[(size_t)(filtErr.size() * 0.999)];
+
+  printf("JUMP DETECTION (files this would have produced)\n");
+  printf("  %zu file(s), %zu of %zu rows recorded (%.1f%% of the log)\n\n",
+         jdFiles, jdRows, rows.size(), 100.0 * jdRows / rows.size());
 
   printf("VERIFICATION (replay vs what the device logged)\n");
   printf("  baro maths  : max %.4f m\n", worstRaw);

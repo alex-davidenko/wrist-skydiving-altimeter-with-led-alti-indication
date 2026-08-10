@@ -123,6 +123,18 @@
 // loss on a reset is one interval.
 #define CLOCK_SAVE_INTERVAL_MS  300000
 
+// ---- One log file per jump ------------------------------------------------
+// Arming is generous and stopping is slow, on purpose: a missed jump cannot be
+// recovered, a spurious file costs a few hundred kB, and a canopy ride passes
+// through low altitude with plenty of speed left.
+#define JUMP_START_ALT_M      50.0f
+#define JUMP_STOP_ALT_M       10.0f
+#define JUMP_FREEFALL_MPS     20.0f
+#define JUMP_STILL_MPS         1.0f
+#define JUMP_SETTLE_MS        15000
+// No freefall within this long and the recording is abandoned as not-a-jump.
+#define JUMP_MAX_MS         2700000
+
 #define BOOT_ZERO_ENABLED     1
 #define BOOT_ZERO_SETTLE_MS   3000
 
