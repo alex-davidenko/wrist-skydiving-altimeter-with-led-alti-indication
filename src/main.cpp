@@ -108,8 +108,10 @@ static VelocityWindow g_vwin;
 static JumpDetector   g_jump;
 // Accumulated while recording, written into the file at close.
 static struct {
-  float peak, exitAlt, openAlt, maxDescent;
-  uint32_t startMs, ffStartMs, ffEndMs;
+  float peak, openAlt;
+  uint32_t startMs, peakMs, ffStartMs, ffEndMs;
+  float curExit;
+  uint32_t curStart, bestDur;
   bool inFF;
 } g_js = {};
 static AircraftLatch  g_latch;
@@ -1430,27 +1432,42 @@ void loop()
       }
       if (rec)
       {
-        if (alt > g_js.peak) g_js.peak = alt;
-        const float desc = -vwin;
-        if (desc > g_js.maxDescent) g_js.maxDescent = desc;
+        if (alt > g_js.peak) { g_js.peak = alt; g_js.peakMs = now; }
+        // The LONGEST freefall episode is the jump. Not the last, which is the
+        // velocity window twitching near the ground during the flare, and not
+        // the first, which is a ~1 s blip at exit while the window still holds
+        // climb data. Both were tried against real logs; only duration works.
         if (mode == MODE_FREEFALL && !g_js.inFF)
-        { g_js.inFF = true; g_js.exitAlt = alt; g_js.ffStartMs = now; }
+        { g_js.inFF = true; g_js.curExit = alt; g_js.curStart = now; }
         if (mode != MODE_FREEFALL && g_js.inFF)
-        { g_js.inFF = false; g_js.openAlt = alt; g_js.ffEndMs = now; }
+        {
+          g_js.inFF = false;
+          if (now - g_js.curStart > g_js.bestDur)
+          {
+            g_js.bestDur = now - g_js.curStart;
+            g_js.openAlt = alt;
+            g_js.ffStartMs = g_js.curStart; g_js.ffEndMs = now;
+          }
+        }
       }
       if (g_jump.justFinished())
       {
         logger::Summary sum{};
         sum.number = g_jumpNumber;
         sum.peakAltM = g_js.peak;
-        sum.exitAltM = g_js.exitAlt;
         sum.openAltM = g_js.openAlt;
-        sum.freefallS = g_js.ffEndMs > g_js.ffStartMs
-                          ? (g_js.ffEndMs - g_js.ffStartMs) / 1000.0f : 0.0f;
+        // Apogee to opening, not the FREEFALL-mode episode. Both ends of this
+        // are well determined; the mode transition at exit is not — it
+        // fragments for the first seconds while the velocity window still holds
+        // climb data, and reported exit 800 m low on real logs.
+        sum.freefallS = g_js.ffEndMs > g_js.peakMs
+                          ? (g_js.ffEndMs - g_js.peakMs) / 1000.0f : 0.0f;
         sum.canopyS = g_js.ffEndMs ? (now - g_js.ffEndMs) / 1000.0f : 0.0f;
-        sum.maxDescentMps = g_js.maxDescent;
-        sum.avgClimbMps = g_js.ffStartMs > g_js.startMs
-                            ? g_js.peak / ((g_js.ffStartMs - g_js.startMs) / 1000.0f)
+        // Distance over time across the freefall: robust where a peak is not.
+        sum.avgFreefallMps = sum.freefallS > 1.0f
+                               ? (g_js.peak - g_js.openAlt) / sum.freefallS : 0.0f;
+        sum.avgClimbMps = g_js.peakMs > g_js.startMs
+                            ? g_js.peak / ((g_js.peakMs - g_js.startMs) / 1000.0f)
                             : 0.0f;
         logger::closeJump(sum);
         g_jumpNumber++;

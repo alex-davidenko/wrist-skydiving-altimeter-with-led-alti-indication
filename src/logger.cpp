@@ -274,10 +274,10 @@ void closeJump(const Summary &s)
   }
   // Trailing rather than leading: the file is opened before any of this is
   // known, and rewriting a header in place on FAT is not worth the risk.
-  g_file.printf("# jump=%lu peak_m=%.0f exit_m=%.0f open_m=%.0f\n",
-                (unsigned long)s.number, s.peakAltM, s.exitAltM, s.openAltM);
-  g_file.printf("# freefall_s=%.1f canopy_s=%.1f max_descent_mps=%.1f avg_climb_mps=%.1f\n",
-                s.freefallS, s.canopyS, s.maxDescentMps, s.avgClimbMps);
+  g_file.printf("# jump=%lu exit_m=%.0f open_m=%.0f\n",
+                (unsigned long)s.number, s.peakAltM, s.openAltM);
+  g_file.printf("# freefall_s=%.1f canopy_s=%.1f avg_freefall_mps=%.1f avg_climb_mps=%.1f\n",
+                s.freefallS, s.canopyS, s.avgFreefallMps, s.avgClimbMps);
   g_file.flush();
   g_file.close();
   Serial.printf("logger: jump %lu closed — %s\n", (unsigned long)s.number, g_name);

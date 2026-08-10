@@ -154,6 +154,18 @@ int main(int argc, char **argv)
   FlightModeTracker modes2;
   modes2.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
                 MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+  // Optional third argument: write the detected jump out as a JUMPnnnn.CSV in
+  // the format the firmware now produces, so old flights can be replayed into
+  // a logbook that did not exist when they were flown.
+  FILE *out = (argc > 3) ? fopen(argv[3], "w") : nullptr;
+  const unsigned outNum = (argc > 2) ? (unsigned)atoi(argv[2]) : 0;
+  bool outHeader = false;
+  float oExit = 0, oOpen = 0, oMaxDesc = 0;
+  uint32_t oFfStart = 0, oFfEnd = 0, oBestDur = 0;
+  float oPeak = -1e9f; uint32_t oPeakMs = 0;
+  float cExit = 0, cMax = 0; uint32_t cStart = 0;
+  bool oInFf = false;
+
   JumpDetector jd;
   jd.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
             JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
@@ -236,11 +248,57 @@ int main(int argc, char **argv)
     if (descending && !inAircraft2 && latch2.inAircraft()) rearm2++;
 
     const bool jrec = jd.update(alt, vw, ph2, r.tMs);
+    if (out && jrec)
+    {
+      if (!outHeader)
+      {
+        fprintf(out, "# altimeter jump log\n# mode=FLIGHT sample_hz=%d osr=12 math_mode=1\n",
+                h.sampleHz);
+        fprintf(out, "# qnh=%.2f ground_p=%.3f\n", h.qnh, h.groundP);
+        fprintf(out, "# extracted from %s by tools/replay\n", argv[1]);
+        fprintf(out, "t_ms,p_hpa,temp_c,alt_raw_m,alt_filt_m,vs_mps,zone,phase,ground_p\n");
+        outHeader = true;
+      }
+      // The LONGEST freefall episode is the jump. Not the last, which is the
+      // velocity window twitching near the ground during the flare (1.4 s from
+      // 423 m), and not the first, which is a ~1 s blip at exit while the
+      // window still holds climb data. Only duration separates them.
+      if (alt > oPeak) { oPeak = alt; oPeakMs = r.tMs; }
+      if (ph2 == MODE_FREEFALL && !oInFf)
+      { oInFf = true; cExit = alt; cStart = r.tMs; cMax = 0; }
+      if (oInFf && -vw > cMax) cMax = -vw;
+      if (ph2 != MODE_FREEFALL && oInFf)
+      {
+        oInFf = false;
+        if (r.tMs - cStart > oBestDur)
+        {
+          oBestDur = r.tMs - cStart;
+          oExit = cExit; oOpen = alt; oFfStart = cStart; oFfEnd = r.tMs;
+          oMaxDesc = cMax;
+        }
+      }
+      fprintf(out, "%lu,%.3f,%.2f,%.3f,%.3f,%.2f,%d,%d,%.3f\n",
+              (unsigned long)r.tMs, r.pHpa, r.tempC, r.rawM, r.filtM,
+              vw, (int)z, (int)ph2, r.groundP);
+    }
     if (jrec) jdRows++;
     if (jrec && !jdWas) { jdStartMs = r.tMs; jdStartAlt = alt; jdFiles++; }
     if (jd.justAborted())
       printf("  discarded a recording that never saw freefall (t=%.0f..%.0f s)\n",
              jdStartMs / 1000.0, r.tMs / 1000.0);
+    if (out && jd.justFinished())
+    {
+      // Apogee to opening. Both ends well determined, unlike the exit-side
+      // mode transition, which fragments while the window still holds climb.
+      const double ffS = (oFfEnd > oPeakMs) ? (oFfEnd - oPeakMs) / 1000.0 : 0.0;
+      const double canS = oFfEnd ? (r.tMs - oFfEnd) / 1000.0 : 0.0;
+      const double climbS = (oPeakMs > jdStartMs) ? (oPeakMs - jdStartMs) / 1000.0 : 0.0;
+      fprintf(out, "# jump=%u exit_m=%.0f open_m=%.0f\n", outNum, oPeak, oOpen);
+      fprintf(out, "# freefall_s=%.1f canopy_s=%.1f avg_freefall_mps=%.1f avg_climb_mps=%.1f\n",
+              ffS, canS, ffS > 1.0 ? (oPeak - oOpen) / ffS : 0.0,
+              climbS > 0 ? oPeak / climbS : 0.0);
+      fclose(out); out = nullptr;
+    }
     if (jd.justFinished())
       printf("  jump %zu: t=%.0f..%.0f s, %.0f m -> %.0f m, peak %.0f m, %.1f min\n",
              jdFiles, jdStartMs / 1000.0, r.tMs / 1000.0, jdStartAlt, alt,

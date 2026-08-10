@@ -33,9 +33,16 @@ namespace logger {
 struct Summary
 {
   uint32_t number;
-  float peakAltM, exitAltM, openAltM;
+  // Peak IS the exit altitude — the device is on the jumper, so their apogee is
+  // the moment they left. A separate "exit" field only ever restated it late.
+  float peakAltM, openAltM;
   float freefallS, canopyS;
-  float maxDescentMps, avgClimbMps;
+  // Average over the freefall, not a peak. Peak descent is NOT measurable with
+  // this enclosure: freefall noise is 9-16 m RMS and heavily correlated, so the
+  // maximum of any windowed rate is the maximum of the noise. Measured on jump
+  // 1 against a true 49.4 m/s, the reported peak was 105 m/s at a 1.5 s window
+  // and still 62 m/s at 8 s. An average over the whole freefall is robust.
+  float avgFreefallMps, avgClimbMps;
 };
 
 // Mount the card and allocate the ring. Opens no file: one file per jump now,
