@@ -452,6 +452,12 @@
 // A mode change swaps the whole meaning of the LED, so it is damped harder
 // than a band change within a mode.
 #define MODE_DWELL_MS              400
+// Vertical speed for the phase machine comes from a least-squares slope over
+// this much altitude history, not from the Kalman velocity state — see the
+// header of lib/altimeter_core/velocity_window.h for the four jumps of measured
+// data behind that. 1500 ms is the shortest window that gave zero false-climb
+// samples on the noisiest flight.
+#define VELOCITY_WINDOW_MS         1500
 
 // Unbuckle reminder during the climb. 500-600 m at ~5 m/s is a 20 s window.
 #define CLIMB_UNBUCKLE_LO_M     500.0f
@@ -464,6 +470,12 @@
 // calls it CANOPY, and the screen blanks moments before exit.
 #define AIRCRAFT_LATCH_ALT_M    300.0f
 #define AIRCRAFT_CLEAR_ALT_M    100.0f
+// How far below its own peak the altitude must fall before the aircraft latch
+// refuses to re-arm. You cannot be riding up while you are this far below where
+// you just were, whatever a 1.5 s velocity window thinks of a riser input or a
+// thermal. Keyed off the peak rather than off FREEFALL so it also covers a
+// hop-and-pop that never reaches freefall speed.
+#define AIRCRAFT_DESCENT_CONFIRM_M 150.0f
 
 // Climb progress: one green flash per this much altitude gained.
 #define CLIMB_MARK_INTERVAL_M    100.0f
