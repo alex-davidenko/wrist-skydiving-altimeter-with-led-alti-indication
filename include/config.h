@@ -117,6 +117,24 @@
 // warm-up excursion measured to finish by 1.3 s — so the wait costs nothing on
 // top of the graphics. Anything left over is what the weather-drift correction
 // exists to clean up.
+// How often the wall clock is mirrored to NVS. The RST button cuts EN on this
+// board, taking the RTC domain with it, so without this the clock resets to the
+// firmware build date every time you come back from USB drive mode. Worst-case
+// loss on a reset is one interval.
+#define CLOCK_SAVE_INTERVAL_MS  300000
+
+// ---- One log file per jump ------------------------------------------------
+// Arming is generous and stopping is slow, on purpose: a missed jump cannot be
+// recovered, a spurious file costs a few hundred kB, and a canopy ride passes
+// through low altitude with plenty of speed left.
+#define JUMP_START_ALT_M      50.0f
+#define JUMP_STOP_ALT_M       10.0f
+#define JUMP_FREEFALL_MPS     20.0f
+#define JUMP_STILL_MPS         1.0f
+#define JUMP_SETTLE_MS        15000
+// No freefall within this long and the recording is abandoned as not-a-jump.
+#define JUMP_MAX_MS         2700000
+
 #define BOOT_ZERO_ENABLED     1
 #define BOOT_ZERO_SETTLE_MS   3000
 
@@ -452,6 +470,12 @@
 // A mode change swaps the whole meaning of the LED, so it is damped harder
 // than a band change within a mode.
 #define MODE_DWELL_MS              400
+// Vertical speed for the phase machine comes from a least-squares slope over
+// this much altitude history, not from the Kalman velocity state — see the
+// header of lib/altimeter_core/velocity_window.h for the four jumps of measured
+// data behind that. 1500 ms is the shortest window that gave zero false-climb
+// samples on the noisiest flight.
+#define VELOCITY_WINDOW_MS         1500
 
 // Unbuckle reminder during the climb. 500-600 m at ~5 m/s is a 20 s window.
 #define CLIMB_UNBUCKLE_LO_M     500.0f
@@ -464,6 +488,12 @@
 // calls it CANOPY, and the screen blanks moments before exit.
 #define AIRCRAFT_LATCH_ALT_M    300.0f
 #define AIRCRAFT_CLEAR_ALT_M    100.0f
+// How far below its own peak the altitude must fall before the aircraft latch
+// refuses to re-arm. You cannot be riding up while you are this far below where
+// you just were, whatever a 1.5 s velocity window thinks of a riser input or a
+// thermal. Keyed off the peak rather than off FREEFALL so it also covers a
+// hop-and-pop that never reaches freefall speed.
+#define AIRCRAFT_DESCENT_CONFIRM_M 150.0f
 
 // Climb progress: one green flash per this much altitude gained.
 #define CLIMB_MARK_INTERVAL_M    100.0f

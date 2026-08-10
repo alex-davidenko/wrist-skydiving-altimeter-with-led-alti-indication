@@ -10,6 +10,10 @@ bool begin(float, float) { return false; }
 void startTask() {}
 void push(uint32_t, float, float, float, float, float, uint8_t, uint8_t, float) {}
 void close() {}
+bool openJump(uint32_t, float, float) { return false; }
+void closeJump(const Summary &) {}
+void discardJump() {}
+bool recording() { return false; }
 void pause() {}
 void resume() {}
 void setEnabled(bool) {}
@@ -107,11 +111,13 @@ void writeHeader()
 }
 
 // Pick the next unused LOGnnnn.CSV so a power cycle never overwrites a jump.
-bool openNewFile()
+bool openNewFile(uint32_t number)
 {
-  for (uint16_t i = 1; i < 10000; i++)
+  for (uint16_t i = 0; i < 1000; i++)
   {
-    snprintf(g_name, sizeof(g_name), "/LOG%04u.CSV", i);
+    // The jump number is the name. If one already exists — a counter reset, or
+    // a card moved between devices — step forward rather than overwrite it.
+    snprintf(g_name, sizeof(g_name), "/JUMP%04u.CSV", (unsigned)(number + i));
     if (!SD_MMC.exists(g_name))
     {
       g_file = SD_MMC.open(g_name, FILE_WRITE);
@@ -231,19 +237,60 @@ bool begin(float qnhHpa, float groundPHpa)
     }
   }
 
-  if (!openNewFile())
-  {
-    Serial.println(F("logger: could not create a log file"));
-    SD_MMC.end();
-    return false;
-  }
-
   g_ok = true;
-  Serial.printf("logger: %s on %llu MB card, ring %lu rows (%lu KB)\n",
-                g_name, (unsigned long long)g_cardMb,
+  g_enabled = false;                 // nothing is recorded until a jump starts
+  g_name[0] = '\0';
+  Serial.printf("logger: ready on %llu MB card, ring %lu rows (%lu KB)\n",
+                (unsigned long long)g_cardMb,
                 (unsigned long)g_ringLen,
                 (unsigned long)(sizeof(Rec) * g_ringLen / 1024));
   return true;
+}
+
+bool recording() { return g_ok && g_file; }
+
+bool openJump(uint32_t number, float qnhHpa, float groundPHpa)
+{
+  if (!g_ok || g_file) return false;
+  g_qnh = qnhHpa;
+  g_groundP = groundPHpa;
+  // Start from empty: the ring may hold samples from before the jump armed.
+  g_tail.store(g_head.load(std::memory_order_acquire), std::memory_order_release);
+  if (!openNewFile(number)) return false;
+  g_enabled = true;
+  Serial.printf("logger: recording jump %lu to %s\n", (unsigned long)number, g_name);
+  return true;
+}
+
+void closeJump(const Summary &s)
+{
+  if (!g_ok || !g_file) return;
+  g_enabled = false;
+  const uint32_t deadline = millis() + 500;
+  while (g_head.load(std::memory_order_acquire) != g_tail.load(std::memory_order_acquire) &&
+         static_cast<int32_t>(millis() - deadline) < 0)
+  {
+    delay(10);
+  }
+  // Trailing rather than leading: the file is opened before any of this is
+  // known, and rewriting a header in place on FAT is not worth the risk.
+  g_file.printf("# jump=%lu peak_m=%.0f exit_m=%.0f open_m=%.0f\n",
+                (unsigned long)s.number, s.peakAltM, s.exitAltM, s.openAltM);
+  g_file.printf("# freefall_s=%.1f canopy_s=%.1f max_descent_mps=%.1f avg_climb_mps=%.1f\n",
+                s.freefallS, s.canopyS, s.maxDescentMps, s.avgClimbMps);
+  g_file.flush();
+  g_file.close();
+  Serial.printf("logger: jump %lu closed — %s\n", (unsigned long)s.number, g_name);
+}
+
+void discardJump()
+{
+  if (!g_ok || !g_file) return;
+  g_enabled = false;
+  g_file.close();
+  SD_MMC.remove(g_name);
+  Serial.printf("logger: discarded %s (no freefall — not a jump)\n", g_name);
+  g_name[0] = '\0';
 }
 
 void startTask()

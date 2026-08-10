@@ -25,7 +25,14 @@
 #include "altitude_filter.h"
 #include "baro_math.h"
 #include "flight_mode.h"
+#include "jump_detect.h"
+#include "velocity_window.h"
+#include "flight_mode.h"
 #include "zones.h"
+
+// The mode thresholds are not in the log header, so take them from the same
+// config.h the firmware compiles against — replay must not carry its own copy.
+#include "config.h"
 
 namespace {
 
@@ -131,6 +138,38 @@ int main(int argc, char **argv)
   ZoneTracker zones;
   zones.begin(zc);
 
+  // The phase machine and the aircraft latch, reconstructed. These are what
+  // actually decide the colour, and jump 1 showed the zone can be perfectly
+  // correct while the screen shows none of it.
+  FlightModeTracker modes;
+  modes.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
+               MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+  bool inAircraft = false;
+  size_t phaseMismatch = 0;
+
+  // The proposed fix, run side by side with the real behaviour on the same
+  // samples, so the comparison cannot drift.
+  VelocityWindow vwin;
+  vwin.begin(VELOCITY_WINDOW_MS, 96);
+  FlightModeTracker modes2;
+  modes2.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
+                MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+  JumpDetector jd;
+  jd.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
+            JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
+  bool jdWas = false;
+  size_t jdRows = 0, jdFiles = 0;
+  uint32_t jdStartMs = 0;
+  float jdStartAlt = 0;
+
+  AircraftLatch latch2;
+  latch2.begin(AIRCRAFT_LATCH_ALT_M, AIRCRAFT_CLEAR_ALT_M, AIRCRAFT_DESCENT_CONFIRM_M);
+  size_t scrZone2 = 0, scrBlue2 = 0, scrLadder2 = 0;
+  size_t rearm = 0, rearm2 = 0;
+  // What flightPattern() would have painted, counted over the descent only.
+  size_t scrZone = 0, scrBlue = 0, scrLadder = 0;
+  bool descending = false;
+
   float lastGround = 0.0f;
   bool primed = false;
   double worstRaw = 0, worstFilt = 0;
@@ -179,6 +218,47 @@ int main(int argc, char **argv)
     filtErr.push_back(fe);
     if (z != r.zone) zoneMismatch++;
 
+    const uint8_t ph = modes.update(filt.velocity(), r.tMs);
+    if (ph != r.phase) phaseMismatch++;
+
+    // Mirrors main.cpp exactly: a single CLIMB sample above the latch altitude
+    // re-arms it, and only FREEFALL or dropping below the clear altitude
+    // releases it. That is what suppressed jump 4's landing ladder.
+    const float alt = filt.altitude();
+    if (ph == MODE_CLIMB && alt > AIRCRAFT_LATCH_ALT_M) { if (descending && !inAircraft) rearm++; inAircraft = true; }
+    if (ph == MODE_FREEFALL || alt < AIRCRAFT_CLEAR_ALT_M) inAircraft = false;
+
+    if (r.filtM >= apogee) descending = false;
+    else if (r.filtM < apogee - 50.0f) descending = true;
+    const float vw = vwin.update(filt.altitude(), r.tMs);
+    const uint8_t ph2 = vwin.ready() ? modes2.update(vw, r.tMs) : (uint8_t)MODE_CANOPY;
+    const bool inAircraft2 = latch2.update(alt, ph2);
+    if (descending && !inAircraft2 && latch2.inAircraft()) rearm2++;
+
+    const bool jrec = jd.update(alt, vw, ph2, r.tMs);
+    if (jrec) jdRows++;
+    if (jrec && !jdWas) { jdStartMs = r.tMs; jdStartAlt = alt; jdFiles++; }
+    if (jd.justAborted())
+      printf("  discarded a recording that never saw freefall (t=%.0f..%.0f s)\n",
+             jdStartMs / 1000.0, r.tMs / 1000.0);
+    if (jd.justFinished())
+      printf("  jump %zu: t=%.0f..%.0f s, %.0f m -> %.0f m, peak %.0f m, %.1f min\n",
+             jdFiles, jdStartMs / 1000.0, r.tMs / 1000.0, jdStartAlt, alt,
+             jd.peakAltM(), (r.tMs - jdStartMs) / 60000.0);
+    jdWas = jrec;
+
+    if (descending && alt > 5.0f)
+    {
+      // Same order of tests as led::flightPattern().
+      if (ph == MODE_FREEFALL)                 scrZone++;
+      else if (ph == MODE_CLIMB || inAircraft) scrBlue++;
+      else                                     scrLadder++;
+
+      if (ph2 == MODE_FREEFALL)                  scrZone2++;
+      else if (ph2 == MODE_CLIMB || inAircraft2) scrBlue2++;
+      else                                       scrLadder2++;
+    }
+
     if (r.filtM > apogee) apogee = r.filtM;
     const float descent = -r.vsMps;
     if (descent > maxDescent) maxDescent = descent;
@@ -197,13 +277,19 @@ int main(int argc, char **argv)
   const double p999 = filtErr.empty() ? 0.0
                     : filtErr[(size_t)(filtErr.size() * 0.999)];
 
+  printf("JUMP DETECTION (files this would have produced)\n");
+  printf("  %zu file(s), %zu of %zu rows recorded (%.1f%% of the log)\n\n",
+         jdFiles, jdRows, rows.size(), 100.0 * jdRows / rows.size());
+
   printf("VERIFICATION (replay vs what the device logged)\n");
   printf("  baro maths  : max %.4f m\n", worstRaw);
   printf("  filter      : %.4f m at the 99.9th percentile (peak %.4f m)\n",
          p999, worstFilt);
   printf("  zone        : %zu / %zu samples differ\n", zoneMismatch, rows.size());
+  printf("  phase       : %zu / %zu samples differ\n", phaseMismatch, rows.size());
   const bool trust = p999 < 0.05 && worstRaw < 0.10 &&
-                     zoneMismatch * 200 < rows.size();
+                     zoneMismatch * 200 < rows.size() &&
+                     phaseMismatch * 50 < rows.size();
   printf("  -> %s\n\n", trust
              ? "match. Replay is faithful; tuning experiments are meaningful."
              : "MISMATCH. Check the firmware build matches this log's header "
@@ -227,6 +313,23 @@ int main(int argc, char **argv)
   }
   if (landMs && openMs)
     printf("  canopy      : %.1f s, %.0f m\n", (landMs - openMs) / 1000.0, openAlt);
+
+  {
+    const size_t tot = scrZone + scrBlue + scrLadder;
+    if (tot)
+    {
+      printf("WHAT THE SCREEN SHOWED, descent only (%zu samples)\n", tot);
+      printf("  zone colours : %5.1f%%\n", 100.0 * scrZone / tot);
+      printf("  blue (climb/in-aircraft) : %5.1f%%\n", 100.0 * scrBlue / tot);
+      printf("  landing ladder : %5.1f%%\n", 100.0 * scrLadder / tot);
+      printf("  --- with velocity from a %d ms window ---\n", (int)VELOCITY_WINDOW_MS);
+      printf("  zone colours : %5.1f%%\n", 100.0 * scrZone2 / tot);
+      printf("  blue (climb/in-aircraft) : %5.1f%%\n", 100.0 * scrBlue2 / tot);
+      printf("  landing ladder : %5.1f%%\n", 100.0 * scrLadder2 / tot);
+      printf("  aircraft-latch re-arms during descent: %zu (old) -> %zu (new)", rearm, rearm2);
+      printf("\n\n");
+    }
+  }
 
   // Time spent in each colour zone — what the jumper actually saw.
   printf("\nTIME PER ZONE\n");

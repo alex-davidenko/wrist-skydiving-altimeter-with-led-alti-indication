@@ -28,6 +28,8 @@
 #include "demo.h"
 #include "display.h"
 #include "flight_mode.h"
+#include "jump_detect.h"
+#include "velocity_window.h"
 #include "ground_ref.h"
 #include "led.h"
 #include "logger.h"
@@ -92,6 +94,23 @@ static const char *g_activeWho = "boot";
 // on jump run drops vertical speed below the climb threshold, the phase machine
 // calls it CANOPY, and the screen blanks moments before exit.
 static bool     g_inAircraft   = false;
+#if !BENCH_MODE
+// Vertical speed for the phase machine, from a window of altitude rather than
+// the Kalman velocity state — see velocity_window.h for the flight data behind
+// that. The filter's own velocity is still used for everything else it was
+// always right about: the on-screen readout stays on it only until this proves
+// itself in the air.
+static VelocityWindow g_vwin;
+static JumpDetector   g_jump;
+static uint32_t       g_jumpNumber = 1;      // next jump to be recorded
+// Accumulated while recording, written into the file at close.
+static struct {
+  float peak, exitAlt, openAlt, maxDescent;
+  uint32_t startMs, ffStartMs, ffEndMs;
+  bool inFF;
+} g_js = {};
+static AircraftLatch  g_latch;
+#endif
 #endif
 
 // ---------------------------------------------------------------------------
@@ -111,6 +130,23 @@ static void saveCalibration()
 {
   g_prefs.putFloat("qnh", g_qnhHpa);
   g_prefs.putFloat("groundP", g_groundPHpa);
+}
+
+// The RST button drives EN/CHIP_PU on this board, which powers down the RTC
+// domain — so a physical reset loses the clock exactly as a battery pull would,
+// and coming back from USB drive mode always goes through one. Entering USB
+// mode is a software reset and keeps the time; leaving it cannot.
+//
+// So the clock is mirrored into NVS. Cheap because it is rate limited: NVS is
+// flash, and writing every second would wear it out for no benefit.
+static uint32_t g_clockSavedMs = 0;
+
+static void saveClock()
+{
+  const time_t now = time(nullptr);
+  if (now < 1735689600) return;            // 2025-01-01; refuse to store junk
+  g_prefs.putULong("clock", static_cast<uint32_t>(now));
+  g_clockSavedMs = millis();
 }
 
 static void loadCalibration()
@@ -538,6 +574,12 @@ static void powerOff()
 
   holdPeripheralsForDeepSleep();
 
+  // Wake sources are global in ESP-IDF and survive between sleeps. Idle light
+  // sleep arms a 30 s timer every time it runs, and nothing ever cleared it —
+  // so this "power off" inherited it and woke 30 s later with nothing pressed,
+  // then booted and stayed up. Power-off has only ever been genuine on a device
+  // that had not idled once since boot.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
   esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(PIN_BUTTON), 0);
   esp_deep_sleep_start();
 }
@@ -616,6 +658,7 @@ static void clockCommit()
   t.tm_isdst = -1;
   const struct timeval tv = {mktime(&t), 0};
   settimeofday(&tv, nullptr);
+  saveClock();
   Serial.printf("\nClock set: %04d-%02d-%02d %02d:%02d\n",
                 g_clk[0], g_clk[1], g_clk[2], g_clk[3], g_clk[4]);
   display::setBanner("CLOCK SET", "");
@@ -681,6 +724,7 @@ static void handleGesture(const touch::Event &e)
         // Close the log first: the host is about to own this filesystem, and
         // two writers on one FAT corrupt it.
         logger::close();
+        saveClock();                      // the RST out of USB mode loses the RTC
         display::setBanner("REBOOTING", "to USB drive");
         delay(800);
         usbmsc::rebootIntoMode();          // does not return
@@ -977,6 +1021,9 @@ void setup()
     Serial.printf("Reset reason : %s\n", g_resetReason);
   }
 
+  // NVS first: the clock restore below reads from it.
+  g_prefs.begin("altimeter", false);
+
   // The board has no battery-backed clock and no network, so on a cold start
   // it believes it is 1980 — which is what FAT then stamps on every log file.
   // Seed from the firmware build time so files at least land in the right week,
@@ -993,11 +1040,27 @@ void setup()
     bt.tm_min  = atoi(__TIME__ + 3);
     bt.tm_sec  = atoi(__TIME__ + 6);
     const time_t built = mktime(&bt);
-    if (time(nullptr) < built)
+
+    // Plausibility, not "earlier than the build". The old test clobbered any
+    // correctly set time that happened to predate the firmware — which is every
+    // time you set the clock on a build compiled yesterday.
+    const bool haveClock = time(nullptr) >= 1735689600;   // 2025-01-01
+    if (!haveClock)
     {
-      const struct timeval tv = {built, 0};
-      settimeofday(&tv, nullptr);
-      Serial.printf("Clock seeded from build time; 'w <unix>' to set exactly.\n");
+      const uint32_t saved = g_prefs.isKey("clock") ? g_prefs.getULong("clock") : 0;
+      if (saved >= 1735689600)
+      {
+        const struct timeval tv = {static_cast<time_t>(saved), 0};
+        settimeofday(&tv, nullptr);
+        Serial.printf("Clock restored from flash; it will be up to %d min slow.\n",
+                      CLOCK_SAVE_INTERVAL_MS / 60000);
+      }
+      else
+      {
+        const struct timeval tv = {built, 0};
+        settimeofday(&tv, nullptr);
+        Serial.println(F("Clock seeded from build time; set it in MENU or with 'w'."));
+      }
     }
   }
   Serial.println(F("NOT A SAFETY DEVICE — secondary visual aid only."));
@@ -1047,7 +1110,6 @@ void setup()
   // boot zero below costs no extra waiting.
   g_filterSettledMs = millis() + BOOT_ZERO_SETTLE_MS;
 
-  g_prefs.begin("altimeter", false);
   loadCalibration();
 
   g_filter.configureAdaptive(FILTER_GATE_SIGMA, FILTER_MAX_INFLATE);
@@ -1063,6 +1125,12 @@ void setup()
   g_modes.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
                  MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
   g_climb.configure(CLIMB_MARK_INTERVAL_M);
+  g_vwin.begin(VELOCITY_WINDOW_MS, 96);
+  g_jump.begin({JUMP_START_ALT_M, JUMP_STOP_ALT_M, JUMP_FREEFALL_MPS,
+                JUMP_STILL_MPS, JUMP_SETTLE_MS, JUMP_MAX_MS});
+  g_jumpNumber = g_prefs.isKey("jumpno") ? g_prefs.getULong("jumpno") : 1;
+  g_latch.begin(AIRCRAFT_LATCH_ALT_M, AIRCRAFT_CLEAR_ALT_M,
+                AIRCRAFT_DESCENT_CONFIRM_M);
 #endif
 
 #if BOOT_ZERO_ENABLED
@@ -1103,6 +1171,8 @@ void setup()
 #endif
 #if !BENCH_MODE
   g_landing.reset(g_rawAglM);
+  g_vwin.reset();
+  g_latch.reset();
   g_modes.reset(MODE_CANOPY);
   g_climb.update(g_rawAglM, false);
 #endif
@@ -1147,6 +1217,8 @@ void loop()
 
   pollSerial();
   pollButton(now);
+
+  if ((uint32_t)(now - g_clockSavedMs) >= CLOCK_SAVE_INTERVAL_MS) saveClock();
 
   if (touch::available())
   {
@@ -1265,7 +1337,14 @@ void loop()
       // the LED. Otherwise a tracker goes stale while idle and shows a wrong
       // band for a moment when its mode comes back.
       g_landing.update(g_filter.altitude(), now);
-      const FlightMode mode = g_modes.update(g_filter.velocity(), now);
+      // Windowed velocity, not g_filter.velocity(). In freefall the latter
+      // degenerates to the difference of adjacent noisy samples and read up to
+      // 2326 m/s across four logged jumps, with 38-45% of freefall samples
+      // reporting a CLIMB.
+      const float vwin = g_vwin.update(g_filter.altitude(), now);
+      const FlightMode mode = g_vwin.ready()
+                                ? g_modes.update(vwin, now)
+                                : g_modes.mode();
       if (g_climb.update(g_filter.altitude(), mode == MODE_CLIMB))
       {
         led::flashOnce(led::kGreen, CLIMB_FLASH_MS, now);
@@ -1274,8 +1353,49 @@ void loop()
       // Aircraft latch: set by a climb well clear of the ground, released by
       // freefall (the jump) or by coming back down low (a ride down).
       const float alt = g_filter.altitude();
-      if (mode == MODE_CLIMB && alt > AIRCRAFT_LATCH_ALT_M) g_inAircraft = true;
-      if (mode == MODE_FREEFALL || alt < AIRCRAFT_CLEAR_ALT_M) g_inAircraft = false;
+      g_inAircraft = g_latch.update(alt, mode);
+
+      // One file per jump. Everything here is flight-only; the bench has no
+      // phase machine and no jumps to detect.
+      const bool wasRec = g_jump.recording();
+      const bool rec = g_jump.update(alt, vwin, mode, now);
+      if (rec && !wasRec)
+      {
+        g_js = {};
+        g_js.startMs = now;
+        g_js.peak = alt;
+        logger::openJump(g_jumpNumber, g_qnhHpa, g_groundPHpa);
+      }
+      if (rec)
+      {
+        if (alt > g_js.peak) g_js.peak = alt;
+        const float desc = -vwin;
+        if (desc > g_js.maxDescent) g_js.maxDescent = desc;
+        if (mode == MODE_FREEFALL && !g_js.inFF)
+        { g_js.inFF = true; g_js.exitAlt = alt; g_js.ffStartMs = now; }
+        if (mode != MODE_FREEFALL && g_js.inFF)
+        { g_js.inFF = false; g_js.openAlt = alt; g_js.ffEndMs = now; }
+      }
+      if (g_jump.justFinished())
+      {
+        logger::Summary sum{};
+        sum.number = g_jumpNumber;
+        sum.peakAltM = g_js.peak;
+        sum.exitAltM = g_js.exitAlt;
+        sum.openAltM = g_js.openAlt;
+        sum.freefallS = g_js.ffEndMs > g_js.ffStartMs
+                          ? (g_js.ffEndMs - g_js.ffStartMs) / 1000.0f : 0.0f;
+        sum.canopyS = g_js.ffEndMs ? (now - g_js.ffEndMs) / 1000.0f : 0.0f;
+        sum.maxDescentMps = g_js.maxDescent;
+        sum.avgClimbMps = g_js.ffStartMs > g_js.startMs
+                            ? g_js.peak / ((g_js.ffStartMs - g_js.startMs) / 1000.0f)
+                            : 0.0f;
+        logger::closeJump(sum);
+        g_jumpNumber++;
+        g_prefs.putULong("jumpno", g_jumpNumber);
+        display::setBanner("JUMP LOGGED", "");
+      }
+      if (g_jump.justAborted()) logger::discardJump();
 
       // UNBUCKLE reminder, shown only on the way up.
       const bool unbuckle = g_inAircraft && mode != MODE_FREEFALL &&

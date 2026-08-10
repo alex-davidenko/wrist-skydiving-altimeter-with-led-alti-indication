@@ -15,6 +15,8 @@
 #include "baro_math.h"
 #include "flight_mode.h"
 #include "ground_ref.h"
+#include "jump_detect.h"
+#include "velocity_window.h"
 #include "zones.h"
 
 // Deterministic pseudo-noise so failures are reproducible.
@@ -746,6 +748,182 @@ static void test_periodic_wake_transient_does_not_starve_autozero()
   TEST_ASSERT_FLOAT_WITHIN(0.05f, 1.0f, applied);
 }
 
+
+// ---------------------------------------------------------------------------
+//  Velocity window and the aircraft latch
+// ---------------------------------------------------------------------------
+// The filter's velocity state is unusable in freefall: measured noise rises to
+// 9.5-16.5 m RMS, and differencing adjacent samples turns 10 m over 25 ms into
+// 400 m/s. Logged peaks hit 2326 m/s with 38-45% of freefall samples reading as
+// a CLIMB. A window works because the signal grows with it and the noise does
+// not. This feeds the worst measured noise at the real freefall rate.
+static void test_velocity_window_survives_freefall_noise()
+{
+  VelocityWindow w;
+  w.begin(1500, 96);
+  s_rng = 4242;
+
+  float alt = 3500.0f;
+  uint32_t t = 0;
+  int falseClimb = 0, n = 0;
+  float worst = 0.0f;
+  for (int i = 0; i < 2000; i++)          // 50 s at 40 Hz
+  {
+    alt -= 50.0f * 0.025f;
+    t += 25;
+    const float v = w.update(alt + noise(16.5f), t);
+    if (!w.ready()) continue;
+    n++;
+    if (v > 2.0f) falseClimb++;           // would latch CLIMB
+    const float err = std::fabs(v - (-50.0f));
+    if (err > worst) worst = err;
+  }
+  TEST_ASSERT_TRUE_MESSAGE(n > 1800, "window never became ready");
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, falseClimb,
+                                "freefall noise still reads as a climb");
+  TEST_ASSERT_TRUE_MESSAGE(worst < 25.0f, "windowed velocity error too large");
+}
+
+// Sitting still must not invent motion, and ready() must not be true before the
+// window has actually spanned its own duration — an empty window reads zero,
+// which looks exactly like standing still.
+static void test_velocity_window_quiet_and_ready()
+{
+  VelocityWindow w;
+  w.begin(1500, 96);
+  TEST_ASSERT_FALSE(w.ready());
+  uint32_t t = 0;
+  for (int i = 0; i < 20; i++) { w.update(1.0f + noise(0.22f), t); t += 25; }
+  TEST_ASSERT_FALSE_MESSAGE(w.ready(), "ready before the window is spanned");
+  for (int i = 0; i < 200; i++) { w.update(1.0f + noise(0.22f), t); t += 25; }
+  TEST_ASSERT_TRUE(w.ready());
+  TEST_ASSERT_TRUE_MESSAGE(std::fabs(w.velocity()) < 1.0f,
+                           "invented motion while stationary");
+}
+
+// The bug jump 1 actually showed: the zone ladder was perfectly correct while
+// the screen stayed blue, because one committed CLIMB during the descent
+// re-armed the aircraft latch and it only released on FREEFALL or below 100 m.
+static void test_aircraft_latch_ignores_a_climb_during_descent()
+{
+  AircraftLatch l;
+  l.begin(300.0f, 100.0f, 150.0f);
+
+  for (float a = 0; a < 3500; a += 50) l.update(a, MODE_CLIMB);
+  TEST_ASSERT_TRUE_MESSAGE(l.inAircraft(), "latch never armed on the way up");
+
+  l.update(3400.0f, MODE_FREEFALL);
+  TEST_ASSERT_FALSE(l.inAircraft());
+
+  // Under canopy at 1200 m, a riser input or a thermal reads as a real climb.
+  for (int i = 0; i < 40; i++) l.update(1200.0f, MODE_CLIMB);
+  TEST_ASSERT_FALSE_MESSAGE(l.inAircraft(),
+                            "a climb under canopy re-armed the aircraft latch");
+}
+
+// A hop-and-pop may never reach freefall speed, so a latch that only releases
+// on FREEFALL stays armed the whole way down and hides the ladder. Keying off
+// the altitude trend covers it; keying off having seen FREEFALL does not.
+static void test_aircraft_latch_releases_without_freefall()
+{
+  AircraftLatch l;
+  l.begin(300.0f, 100.0f, 150.0f);
+
+  for (float a = 0; a < 1200; a += 25) l.update(a, MODE_CLIMB);
+  TEST_ASSERT_TRUE(l.inAircraft());
+
+  // Straight out under canopy: never FREEFALL, just down.
+  bool released = false;
+  for (float a = 1200; a > 900; a -= 5)
+  {
+    l.update(a, MODE_CANOPY);
+    if (!l.inAircraft()) { released = true; break; }
+  }
+  TEST_ASSERT_TRUE_MESSAGE(released,
+      "latch held through a hop-and-pop that never reached freefall");
+}
+
+
+// ---------------------------------------------------------------------------
+//  Jump detection
+// ---------------------------------------------------------------------------
+static const JumpDetector::Config kJump = {50.0f, 10.0f, 20.0f, 1.0f, 15000, 2700000};
+
+// Feed a profile at 4 Hz and report what the detector did.
+struct JumpResult { int finished, aborted; float peak; };
+static JumpResult runJump(JumpDetector &d,
+                          std::initializer_list<std::initializer_list<float>> legs,
+                          uint32_t *clock)
+{
+  JumpResult out{0, 0, 0.0f};
+  for (auto leg : legs)
+  {
+    const float *v = leg.begin();
+    const float alt0 = v[0], alt1 = v[1], secs = v[2];
+    const int n = (int)(secs * 4);
+    for (int i = 0; i < n; i++)
+    {
+      const float a = alt0 + (alt1 - alt0) * (i / (float)n);
+      const float vs = (alt1 - alt0) / secs;
+      uint8_t mode = MODE_CANOPY;
+      if (vs > 2.0f) mode = MODE_CLIMB;
+      else if (-vs >= 20.0f) mode = MODE_FREEFALL;
+      *clock += 250;
+      d.update(a, vs, mode, *clock);
+      if (d.justFinished()) out.finished++;
+      if (d.justAborted())  out.aborted++;
+      if (d.peakAltM() > out.peak) out.peak = d.peakAltM();
+    }
+  }
+  return out;
+}
+
+static void test_jump_detect_records_one_file_per_jump()
+{
+  JumpDetector d; d.begin(kJump);
+  uint32_t c = 0;
+  // climb to 3700, freefall to 1100, canopy to 0, then sit there
+  const auto r = runJump(d, {{0,3700,900},{3700,1100,52},{1100,0,200},{0,0,60}}, &c);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(1, r.finished, "should be exactly one jump");
+  TEST_ASSERT_EQUAL_INT(0, r.aborted);
+  TEST_ASSERT_TRUE(r.peak > 3600.0f);
+}
+
+// A hop-and-pop never climbs past the arming altitude under its own power in
+// this model, but freefall alone must still arm the recording.
+static void test_jump_detect_arms_on_freefall_alone()
+{
+  JumpDetector d; d.begin(kJump);
+  uint32_t c = 0;
+  const auto r = runJump(d, {{800,600,8},{600,0,150},{0,0,60}}, &c);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(1, r.finished, "freefall did not arm recording");
+}
+
+// The real one, from LOG0008: driving home from the DZ climbed above the arming
+// altitude and never came back below the stopping one, so a second recording
+// ran for over an hour. A jump contains freefall; this does not.
+static void test_jump_detect_discards_a_drive_home()
+{
+  JumpDetector d; d.begin(kJump);
+  uint32_t c = 0;
+  // up a hill to 90 m, stay there for an hour, never any freefall
+  // 3 m/s up a hill is a car, not an aircraft, but it is a real climb.
+  const auto r = runJump(d, {{0,90,30},{90,86,3600}}, &c);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, r.finished, "a drive home was logged as a jump");
+  TEST_ASSERT_EQUAL_INT_MESSAGE(1, r.aborted, "the drive home was never discarded");
+}
+
+// Climbing a hill and coming back down satisfies every altitude test there is.
+// Only the absence of freefall separates it from a jump.
+static void test_jump_detect_rejects_a_climb_and_descent_without_freefall()
+{
+  JumpDetector d; d.begin(kJump);
+  uint32_t c = 0;
+  const auto r = runJump(d, {{0,400,100},{400,0,300},{0,0,60}}, &c);
+  TEST_ASSERT_EQUAL_INT(0, r.finished);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(1, r.aborted, "a walk up a hill counted as a jump");
+}
+
 static void test_autozero_timeout_scales_with_altitude()
 {
   GroundRef g;
@@ -921,6 +1099,14 @@ int main(int, char **)
   RUN_TEST(test_climb_marker_fires_every_100m);
   RUN_TEST(test_full_jump_profile);
 
+  RUN_TEST(test_jump_detect_records_one_file_per_jump);
+  RUN_TEST(test_jump_detect_arms_on_freefall_alone);
+  RUN_TEST(test_jump_detect_discards_a_drive_home);
+  RUN_TEST(test_jump_detect_rejects_a_climb_and_descent_without_freefall);
+  RUN_TEST(test_velocity_window_survives_freefall_noise);
+  RUN_TEST(test_velocity_window_quiet_and_ready);
+  RUN_TEST(test_aircraft_latch_ignores_a_climb_during_descent);
+  RUN_TEST(test_aircraft_latch_releases_without_freefall);
   RUN_TEST(test_periodic_wake_transient_does_not_starve_autozero);
   RUN_TEST(test_autozero_timeout_scales_with_altitude);
   RUN_TEST(test_autozero_corrects_ground_drift);
