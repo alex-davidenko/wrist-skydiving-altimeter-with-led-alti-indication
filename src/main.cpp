@@ -89,6 +89,10 @@ static uint32_t g_filterSettledMs = 0;
 // assignment. Reading the source has been wrong four times about this.
 static const char *g_activeWho = "boot";
 #define MARK_ACTIVE(t, who) do { g_activeSinceMs = (t); g_activeWho = (who); } while (0)
+// The next jump to be recorded. A user setting rather than flight logic, so it
+// lives outside BENCH_MODE — the bench build never increments it, but the menu
+// that sets it is the same menu.
+static uint32_t g_jumpNumber   = 1;
 #if !BENCH_MODE
 // Latched once a climb passes AIRCRAFT_LATCH_ALT_M. Without it, levelling off
 // on jump run drops vertical speed below the climb threshold, the phase machine
@@ -102,7 +106,6 @@ static bool     g_inAircraft   = false;
 // itself in the air.
 static VelocityWindow g_vwin;
 static JumpDetector   g_jump;
-static uint32_t       g_jumpNumber = 1;      // next jump to be recorded
 // Accumulated while recording, written into the file at close.
 static struct {
   float peak, exitAlt, openAlt, maxDescent;
@@ -612,6 +615,48 @@ static int daysInMonth(int y, int m)
   return d[(m - 1) % 12];
 }
 
+static int16_t g_jd[4] = {0, 0, 0, 1};   // jump number as digits, MSD first
+static uint8_t g_jdField = 0;
+
+static void jumpPublish() { display::setJumpEdit(g_jd, g_jdField); }
+
+static void openJumpEdit()
+{
+  uint32_t n = g_jumpNumber;
+  if (n > 9999) n = 9999;
+  g_jd[0] = (n / 1000) % 10;
+  g_jd[1] = (n / 100) % 10;
+  g_jd[2] = (n / 10) % 10;
+  g_jd[3] = n % 10;
+  g_jdField = 0;
+  g_clkHeldMs = g_clkRepMs = 0;
+  g_clkSwallow = false;
+  jumpPublish();
+}
+
+static void jumpStep(int dir)
+{
+  int16_t v = g_jd[g_jdField] + dir;
+  if (v > 9) v = 0;
+  if (v < 0) v = 9;
+  g_jd[g_jdField] = v;
+  jumpPublish();
+}
+
+// The number you enter is your total SO FAR, so the next jump recorded is the
+// one after it. Entering 846 makes the next file JUMP0847.CSV.
+static void jumpCommit()
+{
+  const uint32_t total = g_jd[0] * 1000 + g_jd[1] * 100 + g_jd[2] * 10 + g_jd[3];
+  g_jumpNumber = total + 1;
+  g_prefs.putULong("jumpno", g_jumpNumber);
+  Serial.printf("\nJump total set to %lu; next log will be JUMP%04lu.CSV\n",
+                (unsigned long)total, (unsigned long)g_jumpNumber);
+  display::setBanner("SAVED", "");
+  delay(900);
+  closeMenu();
+}
+
 static void clockPublish() { display::setClockEdit(g_clk, g_clkField); }
 
 static void openClockEdit()
@@ -732,11 +777,25 @@ static void handleGesture(const touch::Event &e)
       else                                       unmountCard();
       break;
     case display::ACT_CLOCK:    openClockEdit(); break;
-    case display::ACT_CLK_DOWN: clockAdjust(-1);  break;
-    case display::ACT_CLK_UP:   clockAdjust(+1);  break;
+    case display::ACT_JUMPNO:   openJumpEdit(); break;
+    // Both editors share these three buttons, so the active screen decides
+    // which one they drive. One gesture to learn, not two.
+    case display::ACT_CLK_DOWN:
+      if (display::screen() == display::UI_SET_JUMPNO) jumpStep(-1);
+      else                                            clockAdjust(-1);
+      break;
+    case display::ACT_CLK_UP:
+      if (display::screen() == display::UI_SET_JUMPNO) jumpStep(+1);
+      else                                            clockAdjust(+1);
+      break;
     case display::ACT_CLK_NEXT:
-      if (g_clkField < 4) { g_clkField++; clockPublish(); }
-      else                  clockCommit();
+      if (display::screen() == display::UI_SET_JUMPNO)
+      {
+        if (g_jdField < 3) { g_jdField++; jumpPublish(); }
+        else                 jumpCommit();
+      }
+      else if (g_clkField < 4) { g_clkField++; clockPublish(); }
+      else                       clockCommit();
       break;
     case display::ACT_CANCEL:  closeMenu(); break;
     default: break;
@@ -1228,7 +1287,8 @@ void loop()
     // the contact, so this has to sit after it. 500 ms before it starts, so a
     // deliberate single tap never turns into two, then 150 ms a step and 60 ms
     // once it is clearly a long hold — 59 minutes in about six seconds.
-    if (display::screen() == display::UI_SET_CLOCK)
+    if (display::screen() == display::UI_SET_CLOCK ||
+        display::screen() == display::UI_SET_JUMPNO)
     {
       int16_t hx, hy;
       if (touch::held(&hx, &hy))
@@ -1244,7 +1304,9 @@ void loop()
             {
               g_clkRepMs = now;
               g_clkSwallow = true;
-              clockAdjust(a == display::ACT_CLK_UP ? +1 : -1);
+              const int dir = (a == display::ACT_CLK_UP) ? +1 : -1;
+              if (display::screen() == display::UI_SET_JUMPNO) jumpStep(dir);
+              else                                            clockAdjust(dir);
               MARK_ACTIVE(now, "touch");
               g_menuIdleMs = now;
             }

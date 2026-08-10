@@ -40,6 +40,7 @@ enum UiScreen : uint8_t
   UI_MENU3,            // page 3: USB DRIVE
   UI_MENU4,            // page 4: SET CLOCK
   UI_SET_CLOCK,        // the field editor itself
+  UI_SET_JUMPNO,       // same editor, four digits, your jump total
   UI_CONFIRM_ZERO,
   UI_CONFIRM_UNMOUNT,
   UI_CONFIRM_USB,
@@ -59,6 +60,7 @@ enum UiAction : uint8_t
   ACT_CANCEL,
   ACT_CONFIRM,
   ACT_CLOCK,           // open the clock editor
+  ACT_JUMPNO,          // open the jump-number editor
   ACT_CLK_DOWN,
   ACT_CLK_UP,
   ACT_CLK_NEXT
@@ -74,6 +76,9 @@ uint8_t hitTest(int16_t x, int16_t y);
 // Clock editor contents: year, month, day, hour, minute, and which of the five
 // is being edited. Forces a repaint, so it is safe to call on every change.
 void setClockEdit(const int16_t *f5, uint8_t active);
+// Four digits, most significant first. Shares the clock editor's buttons and
+// its ACT_CLK_* actions — same gesture, so there is one thing to learn.
+void setJumpEdit(const int16_t *d4, uint8_t active);
 
 // Blank the panel and put the controller to sleep, before deep or light sleep.
 void sleep();

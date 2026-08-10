@@ -686,10 +686,48 @@ void renderUi(const Shared &st)
     case UI_MENU4:
       g_gfx->setCursor(20, 12);
       g_gfx->print("MENU");
-      drawButton(kBtnWide, RGB565_BLUE, "SET", "CLOCK");
+      drawButton(kBtnLeft,  RGB565_BLUE, "SET", "CLOCK");
+      drawButton(kBtnRight, RGB565_BLUE, "JUMP", "No.");
       drawPager(3, 4);
       break;
 
+    case UI_SET_JUMPNO:
+    {
+      int16_t d[4];
+      uint8_t act;
+      portENTER_CRITICAL(&g_mux);
+      for (int i = 0; i < 4; i++) d[i] = g_clkF[i];
+      act = g_clkActive;
+      portEXIT_CRITICAL(&g_mux);
+
+      g_gfx->setTextSize(2, 2, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(40, 18);
+      g_gfx->print("JUMPS SO FAR");
+
+      char buf[8];
+      snprintf(buf, sizeof(buf), "%d%d%d%d", d[0], d[1], d[2], d[3]);
+      constexpr int16_t kX = 112, kY = 44, kAdv = 24;
+      g_gfx->setTextSize(4, 4, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(kX, kY);
+      g_gfx->print(buf);
+      if (act < 4)
+      {
+        g_gfx->setTextColor(RGB565_YELLOW, RGB565_BLACK);
+        g_gfx->setCursor(kX + act * kAdv, kY);
+        char one[2] = {buf[act], 0};
+        g_gfx->print(one);
+      }
+      g_gfx->setTextSize(1, 1, 0);
+      g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
+      g_gfx->setCursor(20, 84);
+      g_gfx->print("hold +/- to run   swipe to cancel");
+      drawButton(kClkDown, RGB565_BLACK, "-", "");
+      drawButton(kClkNext, RGB565_BLUE, act < 3 ? "NEXT" : "SET", "");
+      drawButton(kClkUp,   RGB565_BLACK, "+", "");
+      break;
+    }
     case UI_SET_CLOCK:
     {
       int16_t f[5];
@@ -1123,6 +1161,16 @@ uint8_t screen()
   return s;
 }
 
+void setJumpEdit(const int16_t *d4, uint8_t active)
+{
+  portENTER_CRITICAL(&g_mux);
+  for (int i = 0; i < 4; i++) g_clkF[i] = d4[i];
+  g_clkActive = active;
+  g_shared.screen = UI_SET_JUMPNO;
+  portEXIT_CRITICAL(&g_mux);
+  g_lastScreen = 0xFF;
+}
+
 void setClockEdit(const int16_t *f5, uint8_t active)
 {
   portENTER_CRITICAL(&g_mux);
@@ -1159,8 +1207,10 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kBtnRight, x, y)) return ACT_UNITS;
       return ACT_CANCEL;
     case UI_MENU4:
-      if (inside(kBtnWide, x, y)) return ACT_CLOCK;
+      if (inside(kBtnLeft, x, y))  return ACT_CLOCK;
+      if (inside(kBtnRight, x, y)) return ACT_JUMPNO;
       return ACT_CANCEL;
+    case UI_SET_JUMPNO:
     case UI_SET_CLOCK:
       // No cancel-by-tapping-elsewhere here: every stray tap during a fiddly
       // edit would throw the whole thing away. Swipe cancels instead.
