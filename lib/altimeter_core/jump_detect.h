@@ -37,6 +37,13 @@ class JumpDetector
   bool update(float altM, float vspeedMps, uint8_t mode, uint32_t nowMs);
 
   bool recording() const { return _rec; }
+
+  // Manual override, for when detection is not trusted yet. forceStart() begins
+  // a recording that the normal stop rule will still end; forceStop() ends one
+  // immediately. Kept inside the detector rather than beside it so there is one
+  // answer to "are we recording", not two that can disagree.
+  void forceStart(float altM, uint32_t nowMs);
+  void forceStop();
   // True for exactly one call, on the sample that closes a jump — the moment
   // to write the summary and roll to the next file.
   bool justFinished() const { return _finished; }

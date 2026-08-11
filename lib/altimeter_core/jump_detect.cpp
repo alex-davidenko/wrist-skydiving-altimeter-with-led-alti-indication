@@ -13,6 +13,31 @@ void JumpDetector::reset()
   _peak = 0.0f; _lowSince = 0; _low = false; _startedMs = 0;
 }
 
+void JumpDetector::forceStart(float altM, uint32_t nowMs)
+{
+  if (_rec) return;
+  _rec = true;
+  _finished = false;
+  _aborted = false;
+  _sawDescent = false;
+  // Forced by hand, so treat freefall as already satisfied: the abandon rule
+  // exists to bin recordings that were never a jump, and a deliberate one is
+  // not that. Otherwise a hop-and-pop started by hand would delete itself.
+  _sawFreefall = true;
+  _peak = altM;
+  _low = false;
+  _startedMs = nowMs;
+}
+
+void JumpDetector::forceStop()
+{
+  if (!_rec) return;
+  _rec = false;
+  _finished = true;      // caller writes the summary and rolls the file
+  _aborted = false;
+  _low = false;
+}
+
 bool JumpDetector::update(float altM, float vspeedMps, uint8_t mode, uint32_t nowMs)
 {
   _finished = false;

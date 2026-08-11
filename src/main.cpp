@@ -1154,8 +1154,25 @@ static void handleCommand(char *line)
                     g_touchDump ? "on" : "off", DISPLAY_W - 1, DISPLAY_H - 1);
       break;
     case 'l':
-      logger::setEnabled(!logger::enabled());
-      Serial.printf("\nSD logging %s\n", logger::enabled() ? "on" : "off");
+#if BENCH_MODE
+      Serial.println(F("\nJump logging is a flight-build feature."));
+#else
+      // Manual override of jump detection. The auto trigger is the normal path,
+      // but until it has proven itself in the air this is the insurance: before
+      // this existed, 'l' set an enable flag with no file behind it, so it
+      // filled the ring and the writer drained it into a closed File.
+      if (g_jump.recording())
+      {
+        g_jump.forceStop();
+        Serial.println(F("\nRecording stopped by hand; it will close this sample."));
+      }
+      else
+      {
+        g_jump.forceStart(g_filter.altitude(), millis());
+        Serial.printf("\nRecording started by hand as JUMP%04lu.CSV\n",
+                      (unsigned long)g_jumpNumber);
+      }
+#endif
       break;
     case '?': case 'h': printHelp(); break;
     case 'c':
