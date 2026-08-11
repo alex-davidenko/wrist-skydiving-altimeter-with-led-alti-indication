@@ -1730,11 +1730,13 @@ void loop()
   // twelve times a second and pay the rail's settling delay each time. A
   // steady-black pattern is the only thing that means "nothing to show".
   {
-    const bool wants = !(pattern.color.r == 0 && pattern.color.g == 0 &&
-                         pattern.color.b == 0);
-    if (wants != led::powered()) led::power(wants);
+    const bool dark = pattern.screenOnly ||
+                      (pattern.color.r == 0 && pattern.color.g == 0 &&
+                       pattern.color.b == 0);
+    if (dark == led::powered()) led::power(!dark);
+    if (dark) led::off();
+    else      led::render(pattern, now);
   }
-  led::render(pattern, now);
 
   // While the demo is playing it owns the screen; the sensor keeps sampling and
   // logging underneath, so nothing about the live pipeline is disturbed.

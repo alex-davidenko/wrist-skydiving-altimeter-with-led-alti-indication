@@ -146,7 +146,8 @@ LedPattern flightPattern(uint8_t mode, uint8_t zone, uint8_t landingZone,
   {
     const bool unbuckle = altitudeM >= CLIMB_UNBUCKLE_LO_M &&
                           altitudeM <= CLIMB_UNBUCKLE_HI_M;
-    return {kBlue, unbuckle ? (uint16_t)CLIMB_UNBUCKLE_BLINK_MS : (uint16_t)0, 0};
+    // screenOnly: the panel goes blue, the strip stays dark for the climb.
+    return {kBlue, unbuckle ? (uint16_t)CLIMB_UNBUCKLE_BLINK_MS : (uint16_t)0, 0, true};
   }
 
   // Under canopy the freefall colours mean nothing — a good canopy at 900 m

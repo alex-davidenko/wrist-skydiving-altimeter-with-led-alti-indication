@@ -70,9 +70,13 @@
 #define LED_COUNT     10
 
 // Gate of a high-side P-channel MOSFET (IRLML6402) between VBAT and the strip.
-// Each WS2812B draws ~1 mA just running its controller, even showing black —
-// ten of them is 10 mA against a 765 uA deep sleep, so an unswitched strip
-// would cost more standby current than the entire rest of the device.
+//
+// Measured on the real strip: 10 pixels showing nothing draw 4.4 mA, which is
+// 0.44 mA apiece for the controller alone. That is 5.7x the whole device's
+// 765 uA deep sleep, and it would run whether the altimeter was on, asleep or
+// "off" — 54 days of standby becomes about 8. Against ~4 mAh for a complete
+// jump at full brightness, the idle draw is the only part worth engineering:
+// a day of doing nothing costs about 26 jumps' worth of light.
 //
 // Active LOW: the gate has a 10k pull-up to VBAT so the strip is OFF whenever
 // this pin is floating, which is the case at boot before setup() runs and
@@ -371,7 +375,11 @@
 
 // 0-255. The onboard WS2812 is retina-searing indoors; turn this up when you
 // move to an external high-power LED for daylight use.
-#define LED_BRIGHTNESS   40
+// Full output. Measured on a 10-pixel strip: ~4 mAh for a whole jump at 255,
+// against a 1000 mAh cell, so there is no power argument for running dimmer —
+// and the reason the strip exists is that the panel is not readable in
+// daylight. 40 was tuned for a single indicator LED at desk distance.
+#define LED_BRIGHTNESS   255
 
 // Bench-only LED bring-up screen: MENU page 5. Steps through every pattern the
 // flight build can show, at a chosen brightness, so a strip can be judged in

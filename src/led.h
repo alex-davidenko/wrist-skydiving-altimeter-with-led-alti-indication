@@ -23,6 +23,14 @@ struct LedPattern
   Rgb      color;
   uint16_t periodMs;
   uint8_t  brightness;
+  // Screen shows the colour, strip stays dark. The two outputs are driven from
+  // one pattern on purpose, so they can never disagree about what zone you are
+  // in — but the ride up is a case where they should legitimately differ: the
+  // panel is carrying altitude and the UNBUCKLE reminder, while a bracelet
+  // glowing blue for a twenty-minute climb is only draining the cell. This is
+  // the one sanctioned way to split them, so the split stays visible and
+  // deliberate rather than becoming a second colour table.
+  bool     screenOnly;
 };
 
 namespace led {
