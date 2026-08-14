@@ -69,20 +69,32 @@
 // is 0.3 ms and harmless; past ~30 it is worth measuring before trusting it.
 #define LED_COUNT     10
 
-// Gate of a high-side P-channel MOSFET (IRLML6402) between VBAT and the strip.
+// Strip power switch — NOT FITTED YET, hence -1, which makes led::power() a
+// no-op and leaves this pin alone. The strip runs straight off VBAT for now
+// because the driver parts need space under the ESP board that the current
+// enclosure does not have.
 //
-// Measured on the real strip: 10 pixels showing nothing draw 4.4 mA, which is
-// 0.44 mA apiece for the controller alone. That is 5.7x the whole device's
-// 765 uA deep sleep, and it would run whether the altimeter was on, asleep or
-// "off" — 54 days of standby becomes about 8. Against ~4 mAh for a complete
-// jump at full brightness, the idle draw is the only part worth engineering:
-// a day of doing nothing costs about 26 jumps' worth of light.
+// What that costs: a WS2812B draws ~0.44 mA running its controller even showing
+// black (measured: 4.4 mA for ten). That is 5.7x the whole device's 765 uA deep
+// sleep, so standby goes from ~54 days to about 8 — and "powered off" from the
+// menu no longer means off. Charge before a jump day, or disconnect the cell
+// for storage.
 //
-// Active LOW: the gate has a 10k pull-up to VBAT so the strip is OFF whenever
-// this pin is floating, which is the case at boot before setup() runs and
-// during sleep. Set to -1 if the MOSFET is not fitted yet.
-#define PIN_LED_PWR   4
-#define LED_PWR_ON    LOW
+// When the enclosure has room, the circuit is a high-side P-channel (IRLML6402)
+// from VBAT to the strip, driven through a small N-channel (2N7000):
+//
+//   VBAT -> P-ch source;  P-ch drain -> strip V+
+//   P-ch gate -> 10k to VBAT, and to N-ch drain
+//   N-ch source -> GND;  N-ch gate -> PIN_LED_PWR, with 100k to GND
+//   then set PIN_LED_PWR to a free pin and LED_PWR_ON to HIGH
+//
+// The N-channel is not optional. A P-channel's gate has to reach VBAT to turn
+// OFF, and VBAT is 4.2 V into a 3.3 V pad: wiring a GPIO straight to the gate
+// pushed current through the protection diode into the 3.3 V rail, and the
+// symptom was the I2C bus dropping out — "MS5611 not found", with a perfectly
+// good sensor.
+#define PIN_LED_PWR   (-1)
+#define LED_PWR_ON    HIGH
 
 #define PIN_LED_R     1
 #define PIN_LED_G     2
