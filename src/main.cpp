@@ -25,6 +25,10 @@
 #include "altitude_filter.h"
 #include "baro_math.h"
 #include "config.h"
+
+#if LOGGER_ENABLED
+#include <SD_MMC.h>   // the console dump reads the card directly
+#endif
 #include "demo.h"
 #include "display.h"
 #include "flight_mode.h"
@@ -108,6 +112,7 @@ static bool     g_inAircraft   = false;
 static VelocityWindow g_vwin;
 static VelocityWindow g_swin;      // slow window, summary only
 static JumpDetector   g_jump;
+static float          g_vsWin = 0.0f;   // what the phase machine actually sees
 // Accumulated while recording, written into the file at close.
 static struct {
   float peak, openAlt;
@@ -1052,7 +1057,7 @@ static void printHelp()
 // and a jump recording mid-dump would interleave badly.
 static void dumpLog(const char *arg)
 {
-#if LOG_ENABLED
+#if LOGGER_ENABLED
   if (!logger::available()) { Serial.println(F("no card")); return; }
 
   logger::pause();
@@ -1671,6 +1676,7 @@ void loop()
       // 2326 m/s across four logged jumps, with 38-45% of freefall samples
       // reporting a CLIMB.
       const float vwin = g_vwin.update(g_filter.altitude(), now);
+      g_vsWin = g_vwin.ready() ? vwin : g_filter.velocity();
       const FlightMode mode = g_vwin.ready()
                                 ? g_modes.update(vwin, now)
                                 : g_modes.mode();
@@ -1792,8 +1798,19 @@ void loop()
 #else
     const uint8_t phase = static_cast<uint8_t>(g_modes.mode());
 #endif
+    // The WINDOWED velocity, not the filter's. The filter's velocity state is
+    // unusable in freefall — jump 183 logged it swinging -768..650 m/s with 30%
+    // of freefall samples reading as a climb, while the phase column beside it
+    // sat correctly in FREEFALL the whole way down. Logging a number the device
+    // no longer acts on makes the file argue with itself, and a later reader has
+    // no way to tell which column to believe.
+#if BENCH_MODE
+    const float vsLog = g_filter.velocity();
+#else
+    const float vsLog = g_vsWin;
+#endif
     logger::push(now, g_pressureHpa, g_tempC, g_rawAglM, g_filter.altitude(),
-                 g_filter.velocity(), g_zones.zone(), phase, g_groundPHpa);
+                 vsLog, g_zones.zone(), phase, g_groundPHpa);
   }
 
   const LedPattern pattern = currentPattern();
