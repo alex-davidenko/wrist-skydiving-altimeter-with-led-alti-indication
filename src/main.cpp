@@ -1084,10 +1084,16 @@ static void dumpLog(const char *arg)
       // Fences so a capture can be sliced out of a terminal log mechanically.
       Serial.printf("\n===BEGIN %s %u===\n", path, (unsigned)f.size());
       uint8_t buf[512];
+      // yield() every chunk. Without it this loop holds the CPU for the whole
+      // file: Serial.write() on USB CDC blocks whenever the host is not draining
+      // fast enough, the task watchdog fires, the board resets and USB vanishes
+      // mid-transfer. A 3 MB dump got through once and then failed every time
+      // after, which reads as a card or file problem and is neither.
       while (f.available())
       {
         const size_t n = f.read(buf, sizeof(buf));
         Serial.write(buf, n);
+        yield();
       }
       f.close();
       Serial.printf("\n===END %s===\n", path);

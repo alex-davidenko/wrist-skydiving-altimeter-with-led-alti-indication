@@ -54,8 +54,26 @@ void begin()
   off();
 }
 
+// What was last written to the hardware. This lives here, not inside render(),
+// because set() and off() write to the strip directly and render() skips a
+// repaint when nothing changed. With the cache private to render(), any call to
+// off() left it claiming a colour the strip was not showing — and the next
+// request for that same colour was then skipped as redundant.
+//
+// The symptom was specific and misleading: on jump 184 the strip was commanded
+// green for 42 s of freefall and stayed dark, while yellow, red and the landing
+// ladder all worked, because only a colour DIFFERENT from the stale cache got
+// through. It looked like green was broken. Green was fine.
+static Rgb     g_lastColor  = {1, 1, 1};   // not a colour we ever set
+static uint8_t g_lastBright = 0;
+static bool    g_primed     = false;
+
 void set(const Rgb &c, uint8_t bright)
 {
+  g_lastColor = c;
+  g_lastBright = bright;
+  g_primed = true;
+
   const uint8_t b = bright ? bright : g_brightness;
   const uint8_t r = scale(c.r, b);
   const uint8_t g = scale(c.g, b);
@@ -166,10 +184,6 @@ void render(const LedPattern &p, uint32_t nowMs)
 {
   // Only repaint when the output actually changes — WS2812 updates briefly
   // disable interrupts, and there is no reason to do that 40x a second.
-  static Rgb     lastColor  = {1, 1, 1};   // not a colour we ever set
-  static uint8_t lastBright = 0;
-  static bool    primed     = false;
-
   Rgb     want   = p.color;
   uint8_t bright = p.brightness;
 
@@ -181,13 +195,10 @@ void render(const LedPattern &p, uint32_t nowMs)
 
   if (!g_flashActive && !blinkOn(nowMs, p.periodMs)) want = kBlack;
 
-  if (!primed || want.r != lastColor.r || want.g != lastColor.g ||
-      want.b != lastColor.b || bright != lastBright)
+  if (!g_primed || want.r != g_lastColor.r || want.g != g_lastColor.g ||
+      want.b != g_lastColor.b || bright != g_lastBright)
   {
-    set(want, bright);
-    lastColor  = want;
-    lastBright = bright;
-    primed     = true;
+    set(want, bright);   // set() is what updates the cache now
   }
 }
 
