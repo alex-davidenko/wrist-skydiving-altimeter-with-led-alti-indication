@@ -1047,6 +1047,55 @@ static void printHelp()
     "  ?            this help"));
 }
 
+// 'd' with no argument lists what is on the card; 'd 183' dumps JUMP0183.CSV.
+// Logging is paused across the read: the writer task and this share one card,
+// and a jump recording mid-dump would interleave badly.
+static void dumpLog(const char *arg)
+{
+#if LOG_ENABLED
+  if (!logger::available()) { Serial.println(F("no card")); return; }
+
+  logger::pause();
+  if (!arg || !*arg)
+  {
+    File dir = SD_MMC.open("/");
+    Serial.println(F("\n--- logs on card ---"));
+    for (File f = dir.openNextFile(); f; f = dir.openNextFile())
+    {
+      if (!f.isDirectory()) Serial.printf("%-16s %8u bytes\n", f.name(), (unsigned)f.size());
+      f.close();
+    }
+    dir.close();
+    Serial.println(F("--- 'd <n>' dumps JUMPnnnn.CSV ---"));
+  }
+  else
+  {
+    char path[24];
+    snprintf(path, sizeof(path), "/JUMP%04u.CSV", (unsigned)atoi(arg));
+    File f = SD_MMC.open(path, FILE_READ);
+    if (!f) { Serial.printf("no such file: %s\n", path); }
+    else
+    {
+      // Fences so a capture can be sliced out of a terminal log mechanically.
+      Serial.printf("\n===BEGIN %s %u===\n", path, (unsigned)f.size());
+      uint8_t buf[512];
+      while (f.available())
+      {
+        const size_t n = f.read(buf, sizeof(buf));
+        Serial.write(buf, n);
+      }
+      f.close();
+      Serial.printf("\n===END %s===\n", path);
+    }
+  }
+  logger::resume();
+  resyncSampleClock();
+#else
+  (void)arg;
+  Serial.println(F("logging is compiled out"));
+#endif
+}
+
 static void printStatus()
 {
   Serial.println(F("\n--- status ---"));
@@ -1173,6 +1222,12 @@ static void handleCommand(char *line)
                       (unsigned long)g_jumpNumber);
       }
 #endif
+      break;
+    case 'd':
+      // Read a log off the card over this port. USB drive mode was the only
+      // way before, and it needs a reset to leave — awkward on a bare board,
+      // impossible once the enclosure is closed over the RST button.
+      dumpLog(arg);
       break;
     case '?': case 'h': printHelp(); break;
     case 'c':

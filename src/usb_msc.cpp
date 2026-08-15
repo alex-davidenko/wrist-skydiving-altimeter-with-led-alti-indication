@@ -8,6 +8,7 @@
 namespace usbmsc {
 bool bootRequested() { return false; }
 void rebootIntoMode() {}
+
 void runForever() {}
 }  // namespace usbmsc
 
@@ -101,10 +102,40 @@ bool bootRequested()
 void rebootIntoMode()
 {
   g_bootFlag = kMagic;
-  Serial.println(F("Rebooting into USB drive mode. Press RST to return."));
+  Serial.println(F("Rebooting into USB drive mode. Press BOOT to return."));
   Serial.flush();
   delay(200);
   esp_restart();
+}
+
+// BOOT is the way out, not just RST.
+//
+// USB drive mode used to be a one-way door: runForever() was literally
+// `while (true) delay(100)` and only a reset left it. That is fine on a bare
+// board and wrong on a finished one — once the enclosure is closed the RST
+// button is under the shell, and the device is stuck presenting a disk until
+// you find something thin enough to poke it with. Which is exactly where Alex
+// ended up, at a dropzone, with a jump he could not download.
+//
+// The boot flag is consumed before any of this runs, so a plain restart comes
+// back as the altimeter.
+static void waitForExit()
+{
+  pinMode(PIN_BUTTON, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
+  for (;;)
+  {
+    const bool down = digitalRead(PIN_BUTTON) == (BUTTON_ACTIVE_LOW ? LOW : HIGH);
+    if (down)
+    {
+      // Eject first: leaving mid-write corrupts the FAT the host is managing.
+      Serial.println(F("usb: BOOT pressed — returning to the altimeter."));
+      Serial.flush();
+      display::message("RETURNING", "eject first!");
+      delay(600);
+      esp_restart();
+    }
+    delay(50);
+  }
 }
 
 void runForever()
@@ -118,8 +149,8 @@ void runForever()
   if (!cardBegin())
   {
     Serial.println(F("usb: no SD card — press RST to return to the altimeter"));
-    display::message("NO CARD", "RST to go back");
-    while (true) delay(100);
+    display::message("NO CARD", "BOOT to go back");
+    waitForExit();
   }
 
   const uint32_t sectorSize  = g_card->csd.sector_size;
@@ -143,7 +174,7 @@ void runForever()
 
   // Nothing else runs in this mode — no sampling, no logging, no altimeter.
   // The card has exactly one owner.
-  while (true) delay(100);
+  waitForExit();
 }
 
 }  // namespace usbmsc
