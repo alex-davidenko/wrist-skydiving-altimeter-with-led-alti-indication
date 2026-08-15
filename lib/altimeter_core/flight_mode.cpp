@@ -64,7 +64,10 @@ FlightMode FlightModeTracker::update(float v, uint32_t nowMs)
   if (_pending == _mode) _pendingSince = nowMs;
   _pending = candidate;
 
-  if (static_cast<uint32_t>(nowMs - _pendingSince) >= _cfg.dwellMs)
+  const uint32_t need = (_mode == MODE_FREEFALL && _cfg.exitFreefallDwellMs)
+                          ? _cfg.exitFreefallDwellMs
+                          : _cfg.dwellMs;
+  if (static_cast<uint32_t>(nowMs - _pendingSince) >= need)
   {
     _mode = candidate;
   }

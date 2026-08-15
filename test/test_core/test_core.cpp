@@ -41,7 +41,7 @@ static const ZoneConfig kFlight = {
     {kZoneBoundDisabledLow, 800.0f, 1200.0f, 1500.0f, 4500.0f}, 0.0f, 8.0f, 50, 400};
 static const ZoneConfig kLanding = {
     {10.0f, 100.0f, 200.0f, 300.0f, kZoneBoundDisabledHigh}, 2.0f, 8.0f, 100, 400};
-static const FlightModeConfig kModes = {20.0f, 15.0f, 2.0f, 0.5f, 400};
+static const FlightModeConfig kModes = {20.0f, 15.0f, 2.0f, 0.5f, 400, 2000};
 
 // ---------------------------------------------------------------------------
 //  Barometric maths
@@ -513,7 +513,14 @@ static void test_flight_mode_transitions_with_hysteresis()
 
   hold(+5.0f, 2000);   TEST_ASSERT_EQUAL(MODE_CLIMB,    m.mode());  // aircraft
   hold(-50.0f, 2000);  TEST_ASSERT_EQUAL(MODE_FREEFALL, m.mode());  // exit
-  hold(-5.0f, 2000);   TEST_ASSERT_EQUAL(MODE_CANOPY,   m.mode());  // open
+
+  // Leaving FREEFALL is deliberately slower than every other transition. On
+  // jump 185 a body-position change stalled the measured descent for about a
+  // second, twice, and a 400 ms dwell was enough to drop out of freefall and
+  // blank the strip mid-jump. Anything shorter than the exit dwell must not.
+  hold(-5.0f, 1000);   TEST_ASSERT_EQUAL_MESSAGE(MODE_FREEFALL, m.mode(),
+      "left FREEFALL on a one-second stall — that is the jump 185 dropout");
+  hold(-5.0f, 1500);   TEST_ASSERT_EQUAL(MODE_CANOPY,   m.mode());  // open
 
   // 17 m/s sits between the 15 m/s exit and 20 m/s enter thresholds, so it
   // must NOT drag a canopy descent back into freefall.

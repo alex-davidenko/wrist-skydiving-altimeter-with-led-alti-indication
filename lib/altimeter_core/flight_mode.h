@@ -45,6 +45,21 @@ struct FlightModeConfig
   // entire meaning of the LED, so this is deliberately slower than the
   // within-mode dwell.
   uint32_t dwellMs;
+
+  // Leaving FREEFALL is slower than everything else, and the asymmetry is the
+  // point. Measured on jump 185: twice mid-freefall the barometric altitude
+  // stopped descending for about a second — once climbing 87 m before resuming —
+  // while body position changed the flow over the port. The samples were clean
+  // and evenly spaced; the pressure really did that. The windowed velocity fell
+  // under the exit threshold, held past a 400 ms dwell, and the phase machine
+  // correctly concluded the fall had stopped. The strip went dark twice during
+  // the part of the jump it exists for.
+  //
+  // Nothing is lost by being slow here. A canopy takes seconds to open, so
+  // showing freefall colours a moment longer costs nothing, while dropping out
+  // for a second in the middle of freefall costs exactly the thing the device
+  // is for. Entering FREEFALL stays fast.
+  uint32_t exitFreefallDwellMs;
 };
 
 class FlightModeTracker

@@ -519,6 +519,21 @@
 // A mode change swaps the whole meaning of the LED, so it is damped harder
 // than a band change within a mode.
 #define MODE_DWELL_MS              400
+// Leaving FREEFALL only. See flight_mode.h for why. Swept against jumps 183-185:
+//
+//   dwell   spurious exits (183 / 184 / 185)
+//   0.4 s        1  /  4  /  3
+//   1.0 s        0  /  2  /  1
+//   2.0 s        0  /  2  /  1
+//   4.0 s        0  /  2  /  1
+//
+// Every bit of the benefit is at 1 s, and nothing after it helps — longer only
+// delays the real transition at canopy opening, which shows freefall colours
+// into the canopy ride. 1.5 s is that plus margin over the ~1 s excursions
+// measured. It halves the dropouts and does not end them: 184 keeps two even at
+// 4 s, so some disturbances outlast any dwell worth having. Those are the
+// static port's problem, not the firmware's.
+#define MODE_EXIT_FREEFALL_DWELL_MS 1500
 // Vertical speed for the phase machine comes from a least-squares slope over
 // this much altitude history, not from the Kalman velocity state — see the
 // header of lib/altimeter_core/velocity_window.h for the four jumps of measured

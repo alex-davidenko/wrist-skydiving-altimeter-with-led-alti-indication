@@ -143,7 +143,8 @@ int main(int argc, char **argv)
   // correct while the screen shows none of it.
   FlightModeTracker modes;
   modes.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
-               MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+               MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS,
+                 MODE_EXIT_FREEFALL_DWELL_MS});
   bool inAircraft = false;
   size_t phaseMismatch = 0;
 
@@ -153,7 +154,8 @@ int main(int argc, char **argv)
   vwin.begin(VELOCITY_WINDOW_MS, 96);
   FlightModeTracker modes2;
   modes2.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
-                MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+                MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS,
+                 MODE_EXIT_FREEFALL_DWELL_MS});
   // Optional third argument: write the detected jump out as a JUMPnnnn.CSV in
   // the format the firmware now produces, so old flights can be replayed into
   // a logbook that did not exist when they were flown.

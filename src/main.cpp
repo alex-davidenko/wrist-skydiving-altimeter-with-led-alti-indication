@@ -1450,7 +1450,8 @@ void setup()
 #if !BENCH_MODE
   g_landing.begin(kLandingConfig);
   g_modes.begin({MODE_FREEFALL_ENTER_MPS, MODE_FREEFALL_EXIT_MPS,
-                 MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS});
+                 MODE_CLIMB_ENTER_MPS, MODE_CLIMB_EXIT_MPS, MODE_DWELL_MS,
+                 MODE_EXIT_FREEFALL_DWELL_MS});
   g_climb.configure(CLIMB_MARK_INTERVAL_M);
   g_vwin.begin(VELOCITY_WINDOW_MS, 96);
   g_swin.begin(SUMMARY_WINDOW_MS, 80);
