@@ -218,9 +218,18 @@ bool update(uint32_t nowMs)
 
   // Advance the profile clock, which is the only thing speed affects. Blink
   // rates below run on nowMs, so 3 Hz and 6 Hz stay honest at 3x.
-  const uint32_t dt = nowMs - g_lastMs;
+  //
+  // dt is clamped because nowMs can be OLDER than g_lastMs. loop() takes its
+  // timestamp once at the top, the gesture handler then blocks for ~2.7 s
+  // loading the card inside that same iteration, and start() sets g_lastMs
+  // after that — so the first update() arrives with a stale `now`, the
+  // unsigned subtraction underflows to about four billion, and the whole
+  // descent is consumed in a single frame. Which is exactly what it did: the
+  // replay ran perfectly, once, in under a millisecond.
+  int32_t dt = static_cast<int32_t>(nowMs - g_lastMs);
+  if (dt < 0 || dt > 500) dt = kStepMs;   // stale, wrapped, or a long stall
   g_lastMs = nowMs;
-  g_accumMs += dt * g_speed;
+  g_accumMs += static_cast<uint32_t>(dt) * g_speed;
   while (g_accumMs >= kStepMs && g_pos + 1 < g_len)
   {
     g_accumMs -= kStepMs;
