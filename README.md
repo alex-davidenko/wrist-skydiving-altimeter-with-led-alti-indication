@@ -2,15 +2,47 @@
 
 ESP32-S3 + MS5611 (GY-63) → filtered altitude → colour-coded 172×320 panel.
 
-Version lives in `FW_VERSION` in `config.h` and is stamped into the boot log and
-every jump log header. **1.0.0 was reserved for the first firmware that had
-flown and been checked against a reference altimeter** — earned on 14–15 August
-2026 across jumps 183–186, which tracked an L&B Altitrack metre for metre on the
-climb.
+## Why this exists
 
-It does not mean finished — see the enclosure warning below. It means the
-numbers have been checked against something real, which is the one thing a desk
-cannot tell you.
+I am a skydiver and I have not had a main canopy malfunction yet. The one I
+think about is a high-speed malfunction — a partial opening, where you are still
+going down fast while trying to work out whether what is above you is landable.
+
+The textbook answer is to keep an eye on your altimeter, know your altitude, and
+cut away in time to deploy the reserve. That is easy to write. What I do not
+know is how it will actually go when it happens: how much attention is left for
+reading a dial while you are dealing with the problem, and how well I will
+notice the altitude disappearing.
+
+My main is a Sabre 2, 150 sq ft. It is forgiving and I pack it well. That does
+not change the arithmetic — a malfunction is a question of when, not if.
+
+So I wanted something that does not need reading. A wristband with LEDs bright
+enough to register at the edge of your vision, that tells you when you are
+**too low and still going too fast**, and that you need to cut away **now**.
+
+That is the whole point of the project. Everything else — the panel, the
+logging, the replay, the logbook — grew around it.
+
+In development since 1 August 2026.
+
+### What that means in the design
+
+The requirement shows up in decisions that would otherwise look arbitrary:
+
+- **A high-speed malfunction is still descending fast**, so the firmware keeps
+  it in FREEFALL and keeps showing the freefall colours — red below 1200 m,
+  blinking red below 800 m — instead of deciding you are under canopy and going
+  quiet. That case is pinned down by a test named for it,
+  `test_high_speed_malfunction_keeps_freefall_warnings`.
+- **Zone colour is the background**, not a label, so it reads without focus.
+- **Dropping a band commits almost immediately; climbing back is damped hard.**
+  A safety indicator should fail toward urgency.
+- **The LED strip exists because the panel is not enough.** Measured in daylight,
+  the screen is not readable at a glance — which is exactly the condition this is
+  meant to work in.
+
+---
 
 Three flight phases, chosen automatically from vertical speed:
 
@@ -36,6 +68,20 @@ Three flight phases, chosen automatically from vertical speed:
 > What remains: the printed body is still permeable (PETG at 100% infill is not
 > airtight — you can blow through it), so the chamber does the sealing rather
 > than the shell.
+
+---
+
+## Version
+
+Version lives in `FW_VERSION` in `config.h` and is stamped into the boot log and
+every jump log header. **1.0.0 was reserved for the first firmware that had
+flown and been checked against a reference altimeter** — earned on 14–15 August
+2026 across jumps 183–186, which tracked an L&B Altitrack metre for metre on the
+climb.
+
+It does not mean finished — see the enclosure warning below. It means the
+numbers have been checked against something real, which is the one thing a desk
+cannot tell you.
 
 ---
 
