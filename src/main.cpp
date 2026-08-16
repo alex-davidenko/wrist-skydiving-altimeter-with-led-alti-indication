@@ -1704,15 +1704,7 @@ void loop()
       }
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
       MARK_ACTIVE(now, "touch");
-    #if LOGGER_ENABLED && !BENCH_MODE
-  // Replay owns the display while it runs, exactly as the demo does. Sampling
-  // and logging carry on underneath — the device is still an altimeter.
-  if (replay::active())
-  {
-    replay::update(now);
-  }
-#endif
-  if (demo::active())                          demo::stop();
+      if (demo::active())                          demo::stop();
       else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
   }
@@ -1945,11 +1937,20 @@ void loop()
   // While the demo is playing it owns the screen; the sensor keeps sampling and
   // logging underneath, so nothing about the live pipeline is disturbed.
   const bool demoRunning = demo::active() && demo::update(now);
+#if LOGGER_ENABLED && !BENCH_MODE
+  // Replay owns the screen on exactly the same terms as the demo, and for the
+  // same reason it must be tested HERE: its frame was previously published
+  // earlier in the loop and then overwritten by the live one a few lines below,
+  // so the replay ran correctly and invisibly, showing ground level.
+  const bool replayRunning = replay::active() && replay::update(now);
+#else
+  constexpr bool replayRunning = false;
+#endif
 
   // Hand the renderer the same pattern the LED is showing, so both outputs
   // agree by construction. This is a spinlock-protected struct copy — the
   // sample loop never touches SPI.
-  if (!demoRunning)
+  if (!demoRunning && !replayRunning)
     display::publish(pattern, g_filter.altitude(), g_filter.velocity());
 
 #if IDLE_SLEEP_ENABLED
