@@ -101,7 +101,10 @@ constexpr Rect kBtnWide  = { 60, 40, 200,  95};   // single-button pages
 // Clock editor: three controls along the bottom, value above them.
 // Three list rows, then a footer with prev/next. Rows are wide and tall
 // because they are tapped with a gloved thumb, not a stylus.
-constexpr Rect kBtnReplay = { 196, 140, 116,  28};   // detail page, bottom right
+// Square, and clear of the stat lines: those are text size 1 from x=14, so
+// about 200 px wide at most. A big target matters here because a mis-tap on
+// this page means "go back to the list".
+constexpr Rect kBtnReplay = { 232,  46,  76,  76};
 constexpr Rect kLbRow[3] = {{ 10, 30, 300, 34},
                             { 10, 66, 300, 34},
                             { 10,102, 300, 34}};

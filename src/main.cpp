@@ -1643,6 +1643,19 @@ void loop()
 {
   const uint32_t now = millis();
 
+#if LOOP_STALL_TRACE
+  // Anything that blocks the loop shows up here with its duration. Guessing at
+  // "it freezes for about half a second every few seconds" has a poor record on
+  // this project; measuring it has a good one.
+  {
+    static uint32_t lastLoop = 0;
+    if (lastLoop && (uint32_t)(now - lastLoop) > LOOP_STALL_MS)
+      Serial.printf("stall: %lu ms (screen %u)\n",
+                    (unsigned long)(now - lastLoop), display::screen());
+    lastLoop = now;
+  }
+#endif
+
   pollSerial();
   pollButton(now);
 

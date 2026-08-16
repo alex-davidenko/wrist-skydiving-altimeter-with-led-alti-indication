@@ -161,6 +161,12 @@
 // board, taking the RTC domain with it, so without this the clock resets to the
 // firmware build date every time you come back from USB drive mode. Worst-case
 // loss on a reset is one interval.
+// Report any loop iteration longer than LOOP_STALL_MS. Cheap, and the only
+// honest way to find out what is blocking — a stall is invisible from outside
+// except as something on screen appearing to freeze.
+#define LOOP_STALL_TRACE     1
+#define LOOP_STALL_MS        80
+
 #define CLOCK_SAVE_INTERVAL_MS  300000
 
 // ---- One log file per jump ------------------------------------------------
