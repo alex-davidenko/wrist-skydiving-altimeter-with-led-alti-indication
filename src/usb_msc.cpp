@@ -16,7 +16,11 @@ void runForever() {}
 
 #include <USB.h>
 #include <USBMSC.h>
-#include <esp32-hal-tinyusb.h>   // usb_persist_restart
+// The RTC watchdog, reached through the HAL. soc/rtc_wdt.h looks like the
+// friendlier API but its RTC_WDT_STG_SEL_* constants are not defined for the
+// S3 in this core, so it does not compile.
+#include <hal/wdt_hal.h>
+#include <soc/rtc_cntl_struct.h>
 #include <driver/sdmmc_host.h>
 #include <sdmmc_cmd.h>
 
@@ -133,23 +137,39 @@ static void waitForExit()
       Serial.flush();
       display::message("RETURNING", "eject first!");
 
-      // Not a bare esp_restart(). Once TinyUSB has run, restarting on top of it
-      // leaves the USB peripheral in a state nothing re-enumerates from — the
-      // device runs perfectly and simply never appears on the host again, and
-      // only a physical RST recovers it because that cuts EN and power-cycles
-      // the PHY. Which is useless when RST is under a sealed enclosure, and is
-      // exactly how this went wrong: BOOT got us out of drive mode and cost us
-      // the port. Espressif track it as esp-idf#9826.
+      // Getting out of here without losing the USB port took three attempts,
+      // so the reasoning is worth keeping.
       //
-      // usb_persist_restart() registers the shutdown handler that prepares the
-      // USB controller before the reset; plain esp_restart() skips it. Stop the
-      // MSC device first so the host sees the disk go away rather than
-      // vanishing mid-transfer.
+      // esp_restart() leaves the USB peripheral unenumerable once TinyUSB has
+      // run (esp-idf#9826): the device boots and runs perfectly and simply
+      // never appears on the host again. usb_persist_restart(RESTART_PERSIST)
+      // did not help either — it is built to keep a CDC link alive across a
+      // reboot, and this is a device-class change, MSC out and CDC in.
+      //
+      // Only RST recovered it, because on this board RST drives EN and
+      // power-cycles the PHY. The RTC watchdog's RESET_RTC action is the one
+      // software reset that reaches that far: it resets the main system AND the
+      // RTC domain, where every softer reset leaves the RTC alone. That is
+      // precisely the domain holding the USB PHY state.
+      //
+      // The cost is that RTC memory does not survive, which is fine now and
+      // would not have been a month ago: the wall clock is mirrored to NVS, so
+      // it comes back within one save interval instead of reverting to the
+      // build date, and the drive-mode boot flag has already been consumed.
       g_msc.end();
       delay(400);
-      usb_persist_restart(RESTART_PERSIST);
-      // Only reached if that fails to register its handler. RST still works.
-      esp_restart();
+
+      // RWDT ticks on the RTC slow clock, nominally ~136 kHz, so this is
+      // roughly half a second — long enough for the message above to be seen.
+      wdt_hal_context_t rwdt = {};
+      rwdt.inst = WDT_RWDT;
+      rwdt.rwdt_dev = &RTCCNTL;
+      wdt_hal_init(&rwdt, WDT_RWDT, 0, false);
+      wdt_hal_write_protect_disable(&rwdt);
+      wdt_hal_config_stage(&rwdt, WDT_STAGE0, 70000, WDT_STAGE_ACTION_RESET_RTC);
+      wdt_hal_enable(&rwdt);
+      wdt_hal_write_protect_enable(&rwdt);
+      for (;;) { delay(10); }        // wait for it to fire
     }
     delay(50);
   }

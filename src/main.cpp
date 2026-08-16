@@ -1344,6 +1344,7 @@ void setup()
                   : rr == ESP_RST_SW        ? "SOFTWARE (reboot)"
                   : rr == ESP_RST_PANIC     ? "PANIC (crash!)"
                   : rr == ESP_RST_EXT       ? "EXTERNAL (RST button)"
+                  : rr == ESP_RST_WDT       ? "RTC WDT (left USB drive mode)"
                                             : "other";
     Serial.printf("Reset reason : %s\n", g_resetReason);
   }
