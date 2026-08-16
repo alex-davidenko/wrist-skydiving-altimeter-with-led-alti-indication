@@ -19,6 +19,10 @@ void runForever() {}
 // The RTC watchdog, reached through the HAL. soc/rtc_wdt.h looks like the
 // friendlier API but its RTC_WDT_STG_SEL_* constants are not defined for the
 // S3 in this core, so it does not compile.
+#include <Preferences.h>
+#include <sys/time.h>
+#include <time.h>
+
 #include <hal/wdt_hal.h>
 #include <soc/rtc_cntl_struct.h>
 #include <driver/sdmmc_host.h>
@@ -35,6 +39,37 @@ RTC_NOINIT_ATTR uint32_t g_bootFlag;
 constexpr uint32_t kMagic = 0xA5C0FFEEu;
 
 USBMSC        g_msc;
+
+// The clock has to be carried across both resets by hand.
+//
+// Entering drive mode is a software restart and leaving it is an RTC-domain
+// reset, and that second one wipes RTC memory — which is where the wall clock
+// lives. Without this, every visit to drive mode costs the time spent there
+// plus however long since the last periodic save. main.cpp writes the clock
+// just before rebooting in; this reads it back, lets it run, and writes it
+// again on the way out, so the round trip costs nothing.
+//
+// Same namespace and key as main.cpp: "altimeter" / "clock".
+Preferences   g_prefs;
+constexpr uint32_t kPlausibleEpoch = 1735689600;   // 2025-01-01
+
+void clockRestore()
+{
+  g_prefs.begin("altimeter", false);
+  const uint32_t saved = g_prefs.isKey("clock") ? g_prefs.getULong("clock") : 0;
+  if (saved >= kPlausibleEpoch)
+  {
+    const struct timeval tv = {static_cast<time_t>(saved), 0};
+    settimeofday(&tv, nullptr);
+  }
+}
+
+void clockSave()
+{
+  const time_t now = time(nullptr);
+  if (now >= static_cast<time_t>(kPlausibleEpoch))
+    g_prefs.putULong("clock", static_cast<uint32_t>(now));
+}
 sdmmc_card_t *g_card = nullptr;
 
 int32_t onRead(uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
@@ -156,6 +191,10 @@ static void waitForExit()
       // would not have been a month ago: the wall clock is mirrored to NVS, so
       // it comes back within one save interval instead of reverting to the
       // build date, and the drive-mode boot flag has already been consumed.
+      // Save before the reset, not after: the reset below wipes RTC memory, so
+      // this is the only copy that survives it.
+      clockSave();
+
       g_msc.end();
       delay(400);
 
@@ -180,6 +219,9 @@ void runForever()
   Serial.begin(115200);
   delay(200);
   Serial.println(F("\n=== USB DRIVE MODE ==="));
+
+  // Pick the clock back up where the altimeter left it, and let it run.
+  clockRestore();
 
   display::begin();
 
