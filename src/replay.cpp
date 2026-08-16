@@ -258,8 +258,6 @@ void start()
   g_landing.reset(a0);
   g_modes.reset(MODE_CLIMB);
   g_inAircraft = true;                  // we open on the aircraft, by construction
-  Serial.printf("replay: START pos=%u len=%u alt=%.0f active=%d\n",
-                g_pos, g_len, (double)a0, (int)g_active);
 }
 
 void stop()
@@ -285,18 +283,6 @@ bool update(uint32_t nowMs)
 {
   if (!g_active || !g_len) return false;
 
-  // Once a second while playing, so a replay that is running but invisible can
-  // be told apart from one that is not running at all. Those two have looked
-  // identical from the outside three times now.
-  static uint32_t lastLog = 0;
-  if (nowMs - lastLog > 1000)
-  {
-    lastLog = nowMs;
-    Serial.printf("replay: pos=%u/%u alt=%.0f vs=%.1f x%u\n",
-                  g_pos, g_len, (double)g_buf[g_pos].alt,
-                  (double)g_buf[g_pos].vs, g_speed);
-  }
-
   // Advance the profile clock, which is the only thing speed affects. Blink
   // rates below run on nowMs, so 3 Hz and 6 Hz stay honest at 3x.
   //
@@ -318,7 +304,6 @@ bool update(uint32_t nowMs)
   }
   if (g_pos + 1 >= g_len)
   {
-    Serial.printf("replay: END at pos=%u/%u\n", g_pos, g_len);
     stop();
     return false;
   }

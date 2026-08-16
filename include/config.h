@@ -161,10 +161,14 @@
 // board, taking the RTC domain with it, so without this the clock resets to the
 // firmware build date every time you come back from USB drive mode. Worst-case
 // loss on a reset is one interval.
-// Report any loop iteration longer than LOOP_STALL_MS. Cheap, and the only
-// honest way to find out what is blocking — a stall is invisible from outside
-// except as something on screen appearing to freeze.
-#define LOOP_STALL_TRACE     1
+// Report any loop iteration longer than LOOP_STALL_MS. Off; set to 1 when
+// something on screen appears to freeze, because a stall is invisible from
+// outside except as exactly that.
+//
+// It earned its place by finding nothing: during a replay the only stall was
+// the 2.5 s card read, where blocking is expected. That ruled out the loop in
+// one run and moved the hunt to the data, which is where the answer was.
+#define LOOP_STALL_TRACE     0
 #define LOOP_STALL_MS        80
 
 #define CLOCK_SAVE_INTERVAL_MS  300000
