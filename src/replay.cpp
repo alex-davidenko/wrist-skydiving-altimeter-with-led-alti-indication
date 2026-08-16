@@ -32,7 +32,13 @@ namespace {
 // jump is ~3000 samples, 12 KB.
 constexpr uint32_t kHz       = 10;
 constexpr uint32_t kStepMs   = 1000 / kHz;
-constexpr uint16_t kMaxRows  = 4000;          // ~6.5 minutes
+// 40 minutes at 10 Hz. Sized for the whole FLIGHT, not the jump: recording arms
+// at 50 m on the climb, and a climb to altitude is twenty minutes. The first
+// cut allowed 4000 samples — 6.7 minutes — so it stopped partway up, decided
+// the highest point it had seen was the apogee, started playback 31 samples
+// from the end and finished instantly. 24000 samples is 192 KB in PSRAM, which
+// is nothing against 8 MB.
+constexpr uint16_t kMaxRows  = 24000;
 constexpr float    kLeadInS  = 3.0f;          // seen before the exit
 
 struct Sample { float alt; float vs; };
@@ -133,6 +139,8 @@ bool load(const char *path)
 
   Serial.printf("replay: %s — %lu rows read, %u kept, %lu ms\n",
                 path, (unsigned long)rows, g_len, (unsigned long)took);
+  if (g_len >= kMaxRows)
+    Serial.println(F("replay: WARNING buffer full — file truncated, apogee may be wrong"));
   if (g_len < 20)
   {
     Serial.println(F("replay: too few usable samples — is this a jump file?"));
