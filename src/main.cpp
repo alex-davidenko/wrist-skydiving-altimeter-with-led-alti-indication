@@ -1493,10 +1493,29 @@ void setup()
   // The dots are driven by the zero's own sample loop rather than by a timer
   // running alongside it, so they cannot keep animating past a stall or stop
   // early — what is on screen is what the device is actually doing.
-  display::bannerIn(kZeroLine, "");
-  if (!zeroHere(zeroDotsTick))
-    Serial.println(F("Boot zero rejected — use 'z' once it is still."));
-  resyncSampleClock();
+  // Safety interlock. See BOOT_ZERO_MAX_ALT_M: a climb is already caught by the
+  // drift test inside zeroHere(), but level flight at altitude is not, and that
+  // is the case that silently under-reads for a whole jump.
+  const bool suspectAltitude =
+      g_calibrated && fabsf(g_rawAglM) > BOOT_ZERO_MAX_ALT_M;
+
+  if (suspectAltitude)
+  {
+    Serial.printf("\nBOOT ZERO REFUSED: %.0f m above the stored ground reference.\n"
+                  "  Either this is not where it was last zeroed, or it is not\n"
+                  "  on the ground. Keeping the old reference; press 'z' or use\n"
+                  "  MENU > ZERO once you are down.\n", (double)g_rawAglM);
+    display::bannerIn("NOT ZEROED", "");
+    display::bannerLine2In("check altitude");
+    delay(2500);
+  }
+  else
+  {
+    display::bannerIn(kZeroLine, "");
+    if (!zeroHere(zeroDotsTick))
+      Serial.println(F("Boot zero rejected — use 'z' once it is still."));
+    resyncSampleClock();
+  }
   display::bannerLine1("Setting the ground zero...");
   display::bannerLine2In(BENCH_MODE ? "Bench mode activated"
                                     : "Flight mode activated");

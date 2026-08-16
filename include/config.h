@@ -142,10 +142,15 @@
 // then is the right one — and it means the altitude is already zeroed by the
 // time the screen shows a number, rather than waiting for a manual 'z'.
 //
-// SAFETY: this trusts that you power up on the ground. Switch it on inside a
-// climbing aircraft and it will happily call that altitude zero. Every baro
-// altimeter that self-zeroes has this property; none of them can tell the
-// difference. Power it up before you board.
+// SAFETY: interlocked two ways, so it no longer simply trusts you to be on the
+// ground. A climb is caught by zeroHere()'s drift test, and level flight at
+// altitude by BOOT_ZERO_MAX_ALT_M above. Both refuse rather than guess, and
+// refusing keeps the previous reference and says so on screen.
+//
+// Neither is a substitute for powering up before you board. The altitude check
+// needs a stored reference to compare against, so a device that has never been
+// zeroed still has only the drift test between it and calling 3000 m the
+// ground.
 //
 // The settle wait is shorter than FILTER_SETTLE_MS because the boot animation
 // has already run by the time this fires — 3 s from sensor init, against a
@@ -174,6 +179,30 @@
 #define JUMP_SETTLE_MS        15000
 // No freefall within this long and the recording is abandoned as not-a-jump.
 #define JUMP_MAX_MS         2700000
+
+// Refuse the boot zero if the stored ground reference says we are already this
+// far off the ground. THIS IS THE SAFETY INTERLOCK ON BOOT_ZERO_ENABLED.
+//
+// Climbing is already covered and always was: zeroHere()'s drift test compares
+// the two halves of its 2 s average, about a second apart, against
+// ZERO_MAX_DRIFT_M. An aircraft climbing at 3-5 m/s moves 3-5 m in that second
+// against a 1.00 m limit, so it is rejected outright.
+//
+// What that misses is LEVEL flight at altitude — holding for clearance, or on
+// jump run. Nothing is moving, the drift test passes, and the device cheerfully
+// calls 3000 m the ground. That is the failure that matters, because it is
+// silent and it under-reads for the whole jump.
+//
+// So compare against the last stored reference before trusting a new one. 150 m
+// clears any weather drift (a 10 hPa day is ~80 m, and that is a big day) while
+// catching anything that could be an aircraft. A different dropzone at a
+// genuinely different elevation will also trip it, and that is the right
+// trade: refusing costs one press of ZERO on the ground, accepting wrongly
+// costs the altitude for the whole jump.
+//
+// Only meaningful with a stored reference. On a device that has never been
+// zeroed there is nothing to compare against and the drift test stands alone.
+#define BOOT_ZERO_MAX_ALT_M   150.0f
 
 #define BOOT_ZERO_ENABLED     1
 #define BOOT_ZERO_SETTLE_MS   3000
