@@ -1,4 +1,4 @@
-# Wrist altimeter — v0.9.0
+# Wrist altimeter — v0.10.0
 
 ESP32-S3 + MS5611 (GY-63) → filtered altitude → colour-coded 172×320 panel.
 
@@ -15,9 +15,19 @@ Three flight phases, chosen automatically from vertical speed:
 | **FREEFALL** | descending > 20 m/s | the colour zones (green/yellow/red/blinking red) |
 | **CANOPY** | anything slower | the landing ladder — dark above 300 m |
 
-> **Not a safety device.** Single uncertified sensor, no redundancy, no
+> **Not a safety device, and it has a known unresolved problem.** Single
+> uncertified sensor, no redundancy, no
 > watchdog on the altitude path. Jump with your normal analogue and audible
 > altimeters. This is for ground testing and as a secondary visual aid.
+
+> **The enclosure is not sealed, and it matters.** Freefall pressure noise is
+> 9-16 m RMS with excursions of about 40 m, measured across five jumps, because
+> air reaches the sensor through the printed body — PETG at 100% infill is not
+> airtight. The altitude is accurate on average (it tracked an L&B Altitrack
+> metre for metre on the climb) but in freefall it wanders, and twice on one
+> jump the display went dark mid-freefall because the measured descent briefly
+> stopped. A sealed, foam-damped static port is the fix and is not built yet.
+> Anyone building this should know that before trusting a number in the air.
 
 ---
 
