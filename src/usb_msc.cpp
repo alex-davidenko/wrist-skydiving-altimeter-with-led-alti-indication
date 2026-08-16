@@ -16,6 +16,7 @@ void runForever() {}
 
 #include <USB.h>
 #include <USBMSC.h>
+#include <esp32-hal-tinyusb.h>   // usb_persist_restart
 #include <driver/sdmmc_host.h>
 #include <sdmmc_cmd.h>
 
@@ -131,7 +132,23 @@ static void waitForExit()
       Serial.println(F("usb: BOOT pressed — returning to the altimeter."));
       Serial.flush();
       display::message("RETURNING", "eject first!");
-      delay(600);
+
+      // Not a bare esp_restart(). Once TinyUSB has run, restarting on top of it
+      // leaves the USB peripheral in a state nothing re-enumerates from — the
+      // device runs perfectly and simply never appears on the host again, and
+      // only a physical RST recovers it because that cuts EN and power-cycles
+      // the PHY. Which is useless when RST is under a sealed enclosure, and is
+      // exactly how this went wrong: BOOT got us out of drive mode and cost us
+      // the port. Espressif track it as esp-idf#9826.
+      //
+      // usb_persist_restart() registers the shutdown handler that prepares the
+      // USB controller before the reset; plain esp_restart() skips it. Stop the
+      // MSC device first so the host sees the disk go away rather than
+      // vanishing mid-transfer.
+      g_msc.end();
+      delay(400);
+      usb_persist_restart(RESTART_PERSIST);
+      // Only reached if that fails to register its handler. RST still works.
       esp_restart();
     }
     delay(50);
