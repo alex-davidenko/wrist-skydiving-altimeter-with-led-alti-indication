@@ -36,6 +36,160 @@ Three flight phases, chosen automatically from vertical speed:
 
 ---
 
+## What it does
+
+### Altitude and zeroing
+
+**Zeroes itself at power-up**, the way a Viso does, while the boot animation
+plays — so the first number on screen is already AGL rather than waiting for a
+manual command. Two interlocks stop it doing that in the wrong place. A climb is
+caught by the zeroing routine's own drift test: it compares the two halves of
+its 2 s average, and an aircraft climbing at 3–5 m/s moves 3–5 m in that second
+against a 1 m limit. Level flight at altitude is caught by comparing against the
+stored ground reference — more than 150 m above it and the zero is refused, the
+old reference kept, and `NOT ZEROED` shown. Refusing costs one press of ZERO on
+the ground; accepting wrongly costs the altitude for a whole jump.
+
+**Corrects for weather drift** while it sits on the ground, because uncorrected
+pressure drift is tens of metres over a jumping day. The settle time scales with
+altitude — `3 + 0.05 × altitude` minutes, following Alti-2's published behaviour
+— which is what makes an aircraft holding at altitude safe: four minutes at
+25 m, but 3.3 hours at 4000 m. It slews at 0.5 m/min rather than stepping, and
+an in-flight latch disables it entirely until the device is demonstrably back
+down and still.
+
+**AGL is a difference of two pressure altitudes**, not a formula re-anchored at
+ground level, which makes it almost immune to QNH error.
+
+### Flight phases, detected automatically
+
+| phase | when | what you see |
+|---|---|---|
+| **CLIMB** | rising > 2 m/s | dark, one green flash per 100 m gained |
+| **FREEFALL** | descending > 20 m/s | the colour zones |
+| **CANOPY** | anything slower | the landing ladder |
+
+Vertical speed for this comes from a **1.5 s window of altitude**, not from the
+filter's velocity state. That is not a preference — five logged jumps showed the
+Kalman velocity peaking past 2000 m/s in freefall noise and reading as *climbing*
+for 38% of the descent. A window works because the signal grows with it and the
+noise does not: falling at 50 m/s means 75 m of altitude change against ~16 m of
+noise.
+
+Leaving FREEFALL takes a deliberately longer dwell than entering it. A change of
+body position can stall the measured descent for about a second, and a short
+dwell drops out of freefall and blanks the display in the middle of the jump.
+
+**Freefall zones** — green above 1500 m, yellow 1200–1500, red 800–1200,
+blinking red below. Dropping a band commits almost immediately while climbing
+back is damped hard: a safety indicator should fail toward urgency. Measured
+through the 800 m threshold at 50 m/s, that asymmetry cut the trigger from 11 m
+late to 2–3 m.
+
+**Landing ladder** under canopy — dark above 300 m, green at 3 blinks/s from
+300, 6 blinks/s from 200, bright steady green 100 m to 10 m, then dark. A
+high-speed malfunction still descends fast, so it stays in FREEFALL and keeps
+warning rather than going quiet.
+
+**UNBUCKLE reminder** on the way up, between 500 and 600 m.
+
+### Logging and the logbook
+
+**One file per jump, started and ended by the device.** Recording arms on a
+latched climb above 50 m, or on freefall speed alone as a fallback, and closes
+once you are back below 10 m and still. A recording that never saw freefall — a
+drive home — is deleted rather than consuming a jump number. Files are named for
+your jump number, which you set once in the menu.
+
+**A summary is written into each file at close**: exit and opening altitude,
+freefall and canopy seconds, average freefall and climb rates.
+
+**On-device logbook** listing every jump on the card with exit, opening and
+average speed, and a detail page per jump.
+
+**Replay** any jump on the screen from the logbook, from three seconds before
+exit down to landing, at 1×, 2× or 3×. It runs through the *real* zone tracker,
+landing ladder and phase machine — not an animation — so it shows what the
+device would do today given that pressure, and a threshold change shows up
+against real data.
+
+**40 Hz sampling**, with SD writes handled by a lock-free ring buffer in PSRAM
+and a separate writer task, so a card stalling for 100 ms cannot disturb the
+sample loop.
+
+### Power
+
+Measured with a meter in series, not estimated:
+
+| state | current | on a 1050 mAh cell |
+|---|---|---|
+| active, backlight on | 110 mA | ~9 h |
+| idle light sleep | 2.7 mA floor, 3–5 mA average | ~10 days |
+| deep sleep (off) | 765 µA | ~57 days |
+
+**A realistic jump day is about 285 mAh** — 16 h idle plus six jumps of active
+display — so roughly a quarter of the battery.
+
+**Idle light sleep** duty-cycles the device down when it is sitting still below
+25 m, waking every 30 s to look. The condition is deliberately "on the ground",
+not "not climbing": an aircraft holding at 4000 m has near-zero vertical speed
+and looks identical to a desk, and sleeping there would mean up to 30 s of
+blindness. It stays awake on USB so it never goes dark mid-session.
+
+**Auto power-off after 16 hours**, into deep sleep, waking on the BOOT button.
+Hygiene for "I left it in my gear bag" rather than a power measure, and it
+refuses while moving.
+
+Getting deep sleep from 1.2 mA to 765 µA meant holding the touch controller in
+reset through sleep — it is self-clocked and keeps scanning the panel with
+nothing listening. Two things measured and ruled out along the way: the SD card
+(50 µA) and power-gating the barometer (0.1 mA, found by unsoldering it).
+
+**Battery: 1050 mAh Li-ion, 25 × 35 × 10 mm.**
+
+### Screen and controls
+
+**1.47" 172×320 colour panel.** The zone colour is the *background*, so it reads
+from across a room, with the altitude in a real typeface baked at display size.
+Only digits that changed are redrawn, composited off-screen first — a typical
+update touches one cell in 2.6 ms.
+
+**The panel renders on the other core.** A full-screen fill measures 23.7 ms
+against a 25 ms sample period, so drawing from the sample loop cost a dropped
+sample per zone change.
+
+**Capacitive touch** with a swipeable menu carousel, a logbook you page through,
+and field editors for the clock and jump number. Stray taps do nothing —
+mis-hitting a button and being thrown back to the altitude screen is worse than
+the tap being ignored — and BOOT closes any screen.
+
+**Feet or metres**, switched in the menu. Conversion happens only at render
+time; everything internal, including logs, stays metric, so switching units
+cannot disturb a tuning constant or the meaning of a file.
+
+**USB drive mode** reads the card without pulling it, entered from the menu and
+left with BOOT.
+
+**A clock** you set in the menu, mirrored to flash so it survives the resets.
+
+**Boot animation** — two blue eyes fade up, blink and smile. The enclosure looks
+like EVE.
+
+### Development
+
+**Two build environments**, `bench` and `flight`, one flag apart — the same
+source with thresholds divided by 1000 so the zone logic can be exercised by
+lifting the board by hand. Separate environments rather than branches, because a
+production branch diverges and a build flag cannot.
+
+**39 host-side tests** over an Arduino-free core, so the logic that is miserable
+to debug on hardware runs on a laptop in under a second.
+
+**An offline replay tool** that links the same translation units the firmware
+builds, so analysis cannot silently drift from the device.
+
+---
+
 ## 1. Wiring
 
 Target board: **Waveshare ESP32-S3-Touch-LCD-1.47**.
