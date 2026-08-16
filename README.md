@@ -20,22 +20,22 @@ Three flight phases, chosen automatically from vertical speed:
 | **FREEFALL** | descending > 20 m/s | the colour zones (green/yellow/red/blinking red) |
 | **CANOPY** | anything slower | the landing ladder — dark above 300 m |
 
-> **Not a safety device, and it has a known unresolved problem.** Single
-> uncertified sensor, no redundancy, no
+> **Not a safety device.** Single uncertified sensor, no redundancy, no
 > watchdog on the altitude path. Jump with your normal analogue and audible
 > altimeters. This is for ground testing and as a secondary visual aid.
 
-> **The enclosure is not sealed, and it matters.** Freefall pressure noise is
-> 9-16 m RMS with excursions of about 40 m, measured across five jumps, because
-> air reaches the sensor through the printed body — PETG at 100% infill is not
-> airtight. The altitude is accurate on average (it tracked an L&B Altitrack
-> metre for metre on the climb) but in freefall it wanders, and twice on one
-> jump the **colour cue** dropped out mid-freefall — the screen went black and
-> the LED strip went dark — because the measured descent briefly stopped and the
-> phase machine concluded the fall had ended. The altitude number stayed lit and
-> readable throughout; it is the colour that is unreliable, not the reading. A
-> sealed, foam-damped static port is the fix and is not built yet. Anyone
-> building this should know that before trusting a colour in the air.
+> **The airflow problem is largely solved, and the history is worth knowing.**
+> The first five jumps ran an unsealed enclosure: freefall pressure noise was
+> 9–16 m RMS, and twice on one jump the colour cue dropped out mid-freefall
+> because the measured descent briefly stopped. A sealed chamber with a damped
+> static port and foam over the sensor took that to **~5 m RMS**, and the colour
+> now holds all the way down. Altitude was always accurate on average — it
+> tracked an L&B Altitrack metre for metre on the climb — the problem was
+> variance, not offset.
+>
+> What remains: the printed body is still permeable (PETG at 100% infill is not
+> airtight — you can blow through it), so the chamber does the sealing rather
+> than the shell.
 
 ---
 
@@ -133,6 +133,10 @@ Measured with a meter in series, not estimated:
 **A realistic jump day is about 285 mAh** — 16 h idle plus six jumps of active
 display — so roughly a quarter of the battery.
 
+Those figures are the device alone. The **LED strip is currently unswitched**,
+adding 4.4 mA continuously even showing black, which cuts standby to about eight
+days and means menu power-off is not really off. See §9.
+
 **Idle light sleep** duty-cycles the device down when it is sitting still below
 25 m, waking every 30 s to look. The condition is deliberately "on the ground",
 not "not climbing": an aircraft holding at 4000 m has near-zero vertical speed
@@ -149,6 +153,14 @@ nothing listening. Two things measured and ruled out along the way: the SD card
 (50 µA) and power-gating the barometer (0.1 mA, found by unsoldering it).
 
 **Battery: 1050 mAh Li-ion, 25 × 35 × 10 mm.**
+
+**The barometer lives in its own sealed compartment**, away from the S3 and the
+backlight. That solved two problems at once: self-heating (38 °C on the board,
+27 °C in its own space — and the MS5611's compensation assumes the die and the
+pressure element are at the same temperature, which a fast descent from a warm
+board to sub-zero air breaks), and airflow. The compartment is the static port:
+one small damped vent, foam over the sensor, and that took freefall noise from
+9–16 m RMS to about 5.
 
 ### Screen and controls
 
@@ -174,6 +186,13 @@ cannot disturb a tuning constant or the meaning of a file.
 left with BOOT.
 
 **A clock** you set in the menu, mirrored to flash so it survives the resets.
+
+**A 10-pixel WS2812B strip**, because the panel is not readable enough in
+daylight for real guidance. It is driven from the *same* `LedPattern` as the
+screen, so the two cannot disagree about what zone you are in — with one
+sanctioned exception: on the ride up the panel goes blue while the strip stays
+dark, since a bracelet glowing through a twenty-minute climb is only draining
+the cell.
 
 **Boot animation** — two blue eyes fade up, blink and smile. The enclosure looks
 like EVE.
@@ -863,17 +882,31 @@ wrong lever and the part's own sleep command is the right one.
 
 ## 8. Where this is up to
 
-Everything below is on hardware and working: sensor, filter, zones, flight
-phases, panel, touch menu, SD logging with verified offline replay, USB drive
-mode, deep sleep, idle light sleep, weather-drift correction, and a full
-real-time demo jump.
+**It flies.** Six jumps as of August 2026, on `v1.0.0` — the version number was
+reserved for firmware that had actually flown and been checked against a
+reference altimeter, and jumps 183–186 did that against an L&B Altitrack.
 
-**The next milestone is not software. It is one logged jump.** Every tuning
-number in this project came from simulation against assumed noise. A single
-jump with the logger running, and your handheld's readings noted at exit,
-opening and a couple of points under canopy, replaces all of it with
-measurement — and answers the one question nothing here can: how big the
-airflow error actually is (see §9).
+Working on hardware, in the air: sensor, filter, zones, flight phases, panel,
+touch menu, per-jump SD logging, the on-device logbook, jump replay, USB drive
+mode, deep sleep, idle light sleep, weather-drift correction, boot zeroing with
+its interlocks, and a 10-pixel WS2812B strip that does the job the panel could
+not — the screen is not readable enough in daylight for real guidance, which is
+why the strip exists.
+
+Three logs from those jumps are in `flight-logs/`, along with the two faults
+they exposed. Both were invisible on a desk and obvious in the first file.
+
+**What changed because of flying it**, none of which simulation predicted:
+
+- Vertical speed had to move off the Kalman state and onto a window of altitude.
+  The filter's velocity peaked past 2000 m/s in freefall noise and read as
+  *climbing* for 38% of the descent.
+- The aircraft latch had to key off altitude trend rather than phase, because
+  one spurious CLIMB sample at 872 m under canopy re-armed it and suppressed the
+  whole landing ladder.
+- Leaving FREEFALL needed a longer dwell than entering it.
+- The enclosure needed a sealed chamber and a static port, which took freefall
+  noise from 9–16 m RMS to ~5 m and stopped the colour dropping out.
 
 ### Measured on hardware, for the record
 
@@ -891,7 +924,11 @@ airflow error actually is (see §9).
 | current, deep sleep | **765 uA** with touch held in reset (was 1.2 mA) |
 | deep sleep, sensor unsoldered | 1.1 mA — the MS5611 is only 0.1 mA of it |
 | sensor temperature, on-board | 38 C — the reason it was moved |
-| sensor temperature, on wires | **27 C** — thermal plume resolved |
+| sensor temperature, own compartment | **27 C** — thermal plume resolved |
+| freefall noise, unsealed enclosure | 9.5 / 11.9 / 13.6 / 11.4 m RMS over four jumps |
+| freefall noise, sealed chamber + foam | **~5 m RMS** |
+| LED strip, 10 px at full green | 105 mA |
+| LED strip, showing black | 4.4 mA — the controllers never stop |
 | post-reset warm-up drift | 1 m over ~1 s, reads as 1.02 m/s (see §6) |
 
 ### Immediate next steps
@@ -913,31 +950,41 @@ airflow error actually is (see §9).
 
 ## 9. Not done yet
 
-- **LED is optional and unused on this board.** The panel is the primary
-  output. A sunlight-readable external LED would need proper constant-current
-  drivers, not GPIO — but the screen may make it unnecessary.
-- **`ZONE_ABOVE` (above 4500 m) shows dim blue.** Guessed, not specified —
-  change in `led::colorFor`.
+- **The LED strip has no power switch.** It runs straight off VBAT and draws
+  4.4 mA even showing black, because a WS2812B's controller never stops. That is
+  5.7x the whole device asleep, so standby is about **8 days rather than 57**,
+  and menu power-off does not really mean off. The fix is a high-side P-channel
+  driven through a small N-channel — full circuit is in `config.h` next to
+  `PIN_LED_PWR`, which is `-1` until it is fitted. It needs enclosure room the
+  current body does not have.
+
+  A GPIO cannot drive that gate directly: the gate has to reach VBAT (4.2 V) to
+  turn *off*, which back-drives a 3.3 V pad and browns out the I2C bus. The
+  symptom is `MS5611 NOT FOUND` with a perfectly good sensor, which points
+  nowhere near the LED circuit.
+
+- **The printed body is still permeable.** The sealed chamber does the work; the
+  shell leaks. PETG at 100% infill is not airtight — you can blow through it,
+  because the voids between extrusion roads connect into continuous channels.
+  Coating the inside, or printing the chamber in resin, is the fix.
+
+- **Peak descent speed is not reported**, only the average. At the old noise
+  level the maximum of any windowed rate was the maximum of the *noise* — 105 m/s
+  against a true 49.4 at a 1.5 s window, still 62 m/s at 8 s. At ~5 m RMS it
+  should now be measurable and is worth revisiting.
+
+- **`ZONE_ABOVE` (above 4500 m) shows dim blue.** Guessed, not specified.
+
 - **The LED-off band is disabled in flight mode**, so it blinks red all the way
-  down. If you want it dark after landing, set the first flight boundary in
-  `config.h` to ~15 m.
-- **Sensor self-heating.** The MS5611 reads 38 C sitting on this board with the
-  panel running, versus 28 C on the C3. Steady-state accuracy is fine, but the
-  MS5611's compensation assumes the die and the pressure element are at the
-  same temperature, and during a fast descent from a 38 C board to sub-zero
-  ambient they are not. Mount the GY-63 off-board on wires, away from the S3
-  and the backlight. That is also where the static port needs to go.
-- **Airflow error is completely uncharacterised**, and it is almost certainly
-  the dominant error in freefall — far larger than the ~2-3 m of trigger
-  latency. At 50 m/s dynamic pressure is ~14 hPa; full stagnation would be
-  ~120 m of error, and even 10-30% coupling on a wrist is tens of metres,
-  varying as the arm moves or the body spins. Needs a proper static port
-  (sealed chamber, vent perpendicular to flow, foam over the opening) and a
-  real jump logged against a handheld altimeter before any of this is
-  trustworthy in an emergency.
-- **No BMP581 support.** When it arrives, `AltitudeFilter` and `ZoneTracker`
-  take metres and know nothing about the sensor, so it should only mean a new
-  reader feeding `aglFromPressure`.
-- **Vibration untested.** MS5611 pressure ports are sensitive to airflow over
-  the opening; on a wrist in freefall this may matter more than sensor noise.
-  Worth a foam vent cover and a real jump comparison against the handheld.
+  down. Set the first flight boundary in `config.h` to ~15 m if you want it dark
+  after landing.
+
+- **Charge management.** The board has VBAT and onboard charging; the firmware
+  reads the battery but does nothing with charging state.
+
+- **No BMP581 support.** `AltitudeFilter` and `ZoneTracker` take metres and know
+  nothing about the sensor, so it should only mean a new reader feeding
+  `aglFromPressure`.
+
+- **`demo.cpp` is redundant.** Replay does the same job with real data. It only
+  survives because nothing has needed the menu slot.
