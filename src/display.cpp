@@ -729,8 +729,14 @@ void renderUi(const Shared &st)
       g_gfx->setTextSize(1, 1, 0);
       g_gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
       g_gfx->setCursor(10, 12);
-      char hdr[32];
-      snprintf(hdr, sizeof(hdr), "LOGBOOK  %u jump%s", tot, tot == 1 ? "" : "s");
+      // Column labels carry the units, once, rather than every row repeating
+      // them. In feet a row would read "185 12395>2789ft 165ft/s" — 25
+      // characters against the 23 a size-2 row allows — so the numbers stay
+      // bare and aligned and the header says what they are. The header is
+      // size 1, which affords about 53.
+      char hdr[56];
+      snprintf(hdr, sizeof(hdr), "LOGBOOK %u    exit>open %s    avg %s",
+               tot, st.feet ? "ft" : "m", st.feet ? "ft/s" : "m/s");
       g_gfx->print(hdr);
 
       for (int i = 0; i < 3; i++)
