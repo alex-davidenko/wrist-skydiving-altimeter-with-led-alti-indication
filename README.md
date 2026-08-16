@@ -30,9 +30,12 @@ Three flight phases, chosen automatically from vertical speed:
 > air reaches the sensor through the printed body — PETG at 100% infill is not
 > airtight. The altitude is accurate on average (it tracked an L&B Altitrack
 > metre for metre on the climb) but in freefall it wanders, and twice on one
-> jump the display went dark mid-freefall because the measured descent briefly
-> stopped. A sealed, foam-damped static port is the fix and is not built yet.
-> Anyone building this should know that before trusting a number in the air.
+> jump the **colour cue** dropped out mid-freefall — the screen went black and
+> the LED strip went dark — because the measured descent briefly stopped and the
+> phase machine concluded the fall had ended. The altitude number stayed lit and
+> readable throughout; it is the colour that is unreliable, not the reading. A
+> sealed, foam-damped static port is the fix and is not built yet. Anyone
+> building this should know that before trusting a colour in the air.
 
 ---
 
