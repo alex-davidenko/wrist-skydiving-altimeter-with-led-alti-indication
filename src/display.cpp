@@ -1398,8 +1398,9 @@ uint8_t hitTest(int16_t x, int16_t y)
     case UI_LED_TEST:
     case UI_SET_JUMPNO:
     case UI_SET_CLOCK:
-      // No cancel-by-tapping-elsewhere here: every stray tap during a fiddly
-      // edit would throw the whole thing away. Swipe cancels instead.
+      // Nothing here cancels: not a stray tap, and not a swipe either. Both
+      // used to, and both threw away a half-finished edit. BOOT is the only
+      // way out, which is the one gesture that cannot happen by accident.
       if (inside(kClkDown, x, y)) return ACT_CLK_DOWN;
       if (inside(kClkUp, x, y))   return ACT_CLK_UP;
       if (inside(kClkNext, x, y)) return ACT_CLK_NEXT;

@@ -891,14 +891,12 @@ static void handleGesture(const touch::Event &e)
     if (e.type == touch::EV_SWIPE_RIGHT) { if (g_lbPage) g_lbPage--; logbookPublish(); return; }
   }
 
-  // Either swipe abandons the edit; that is the only way out without setting.
-  if (scr == display::UI_SET_CLOCK &&
-      (e.type == touch::EV_SWIPE_LEFT || e.type == touch::EV_SWIPE_RIGHT))
-  {
-    Serial.println(F("\nClock edit cancelled."));
-    closeMenu();
-    return;
-  }
+  // No swipe-to-cancel on the editors. It ran before hitTest, so a tap that
+  // dragged even slightly was classified as a swipe and threw the edit away —
+  // which is what Alex kept hitting on the clock screen. The gesture layer sees
+  // a real finger, not an idealised point, and 60 px of travel is not much on a
+  // thumb press. BOOT closes any screen, so there is still a way out, and now
+  // there is no way out by accident.
   if (e.type != touch::EV_TAP) return;
 
   // A press-and-hold ends in a release, which the gesture layer reports as a
