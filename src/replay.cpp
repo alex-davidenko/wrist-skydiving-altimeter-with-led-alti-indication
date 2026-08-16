@@ -71,60 +71,82 @@ bool load(const char *path)
   // Keep one sample per kStepMs of logged time. The log is 40 Hz, so this takes
   // every fourth row — but by timestamp rather than by count, because a dropped
   // row would otherwise shift everything after it.
+  // Block reads, not byte-at-a-time. The first version called f.read() per
+  // character: three million SD calls for a 3 MB file, about ten seconds, long
+  // enough that the menu timeout fired and dropped the whole thing back to the
+  // altitude screen before playback ever started.
+  static uint8_t io[4096];
   char line[160];
   size_t n = 0;
   uint32_t nextT = 0;
   bool first = true;
   float peak = -1e9f;
   uint16_t peakIdx = 0;
+  uint32_t rows = 0;
+  const uint32_t t0 = millis();
 
-  while (f.available() && g_len < kMaxRows)
+  while (g_len < kMaxRows)
   {
-    const int c = f.read();
-    if (c < 0) break;
-    if (c != '\n')
+    const int got = f.read(io, sizeof(io));
+    if (got <= 0) break;
+
+    for (int i = 0; i < got && g_len < kMaxRows; i++)
     {
-      if (n < sizeof(line) - 1) line[n++] = (char)c;
-      continue;
+      const char c = (char)io[i];
+      if (c != '\n')
+      {
+        if (n < sizeof(line) - 1) line[n++] = c;
+        continue;
+      }
+      line[n] = '\0';
+      n = 0;
+      if (line[0] == '#' || line[0] == 't' || line[0] == '\0') continue;
+      rows++;
+
+      // t_ms,p_hpa,temp_c,alt_raw_m,alt_filt_m,vs_mps,zone,phase,ground_p
+      uint32_t t = 0; float alt = 0, vs = 0;
+      int field = 0; const char *p = line; bool ok = false;
+      for (;;)
+      {
+        if      (field == 0) t   = strtoul(p, nullptr, 10);
+        else if (field == 4) alt = strtof(p, nullptr);
+        else if (field == 5) { vs = strtof(p, nullptr); ok = true; break; }
+        const char *comma = strchr(p, ',');
+        if (!comma) break;
+        p = comma + 1;
+        field++;
+      }
+      if (!ok) continue;
+
+      if (first) { nextT = t; first = false; }
+      if (t + 1 < nextT) continue;
+      nextT = t + kStepMs;
+
+      g_buf[g_len] = {alt, vs};
+      if (alt > peak) { peak = alt; peakIdx = g_len; }
+      g_len++;
     }
-    line[n] = '\0';
-    n = 0;
-    if (line[0] == '#' || line[0] == 't') continue;
-
-    // t_ms,p_hpa,temp_c,alt_raw_m,alt_filt_m,vs_mps,zone,phase,ground_p
-    uint32_t t = 0; float alt = 0, vs = 0;
-    int field = 0; const char *p = line;
-    for (;;)
-    {
-      if      (field == 0) t   = strtoul(p, nullptr, 10);
-      else if (field == 4) alt = strtof(p, nullptr);
-      else if (field == 5) { vs = strtof(p, nullptr); break; }
-      const char *comma = strchr(p, ',');
-      if (!comma) break;
-      p = comma + 1;
-      field++;
-    }
-    if (field < 5) continue;
-
-    if (first) { nextT = t; first = false; }
-    if (t + 1 < nextT) continue;               // not yet time for another sample
-    nextT = t + kStepMs;
-
-    g_buf[g_len] = {alt, vs};
-    if (alt > peak) { peak = alt; peakIdx = g_len; }
-    g_len++;
-
-    if ((g_len & 0x3F) == 0) yield();          // a 3 MB read is a long time to hold the CPU
+    yield();
   }
+  const uint32_t took = millis() - t0;
   f.close();
 
-  if (g_len < 20) { g_len = 0; return false; }
+  Serial.printf("replay: %s — %lu rows read, %u kept, %lu ms\n",
+                path, (unsigned long)rows, g_len, (unsigned long)took);
+  if (g_len < 20)
+  {
+    Serial.println(F("replay: too few usable samples — is this a jump file?"));
+    g_len = 0;
+    return false;
+  }
 
   // Start a few seconds before apogee. Apogee is the exit — the device is on
   // the jumper — so this opens on the aircraft and then the jump, rather than
   // on a wall of green already in freefall.
   const uint16_t lead = (uint16_t)(kLeadInS * kHz);
   g_start = (peakIdx > lead) ? (uint16_t)(peakIdx - lead) : 0;
+  Serial.printf("replay: apogee %.0f m at sample %u; starting at %u of %u\n",
+                (double)peak, peakIdx, g_start, g_len);
   return true;
 }
 

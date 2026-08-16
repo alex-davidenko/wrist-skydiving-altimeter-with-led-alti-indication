@@ -775,6 +775,11 @@ static void startReplay()
   replay::start();
   replayTopText();
   display::setScreen(display::UI_REPLAY);
+  // load() blocks for as long as it takes to read the card, and the menu
+  // timeout is measured from the last gesture. Without this the timeout has
+  // already expired by the time playback starts and closeMenu() drops straight
+  // to the altitude screen — which is exactly what it did.
+  g_menuIdleMs = millis();
 }
 
 static void endReplay()
@@ -1743,8 +1748,13 @@ void loop()
     }
   }
 
-  // Never leave a menu covering the altitude in the air.
+  // Never leave a menu covering the altitude in the air. Replay is exempt: it
+  // is a deliberate act with its own exit, and timing it out mid-jump would be
+  // the screen taking the decision away.
   if (display::screen() != display::UI_ALT &&
+#if LOGGER_ENABLED && !BENCH_MODE
+      !replay::active() &&
+#endif
       static_cast<uint32_t>(now - g_menuIdleMs) > MENU_TIMEOUT_MS)
   {
     closeMenu();
