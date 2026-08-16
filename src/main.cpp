@@ -37,6 +37,7 @@
 #include "ground_ref.h"
 #include "led.h"
 #include "logbook.h"
+#include "replay.h"
 #include "logger.h"
 #include "touch.h"
 #include "usb_msc.h"
@@ -740,8 +741,55 @@ static void openLogbook()
   logbookPublish();
 }
 
+#if LOGGER_ENABLED && !BENCH_MODE
+static void openJumpDetail(uint8_t row);   // defined below; replay returns to it
+static uint8_t g_dtRow = 0;          // which list row the detail view is showing
+
+static void replayTopText()
+{
+  // The top band normally carries vertical speed, which during a replay is
+  // already on screen as the altitude moving. So it carries the speed control
+  // instead, with the active rate bracketed.
+  const uint8_t sp = replay::speed();
+  char t[24];
+  snprintf(t, sizeof(t), "%s1x%s %s2x%s %s3x%s",
+           sp == 1 ? "[" : " ", sp == 1 ? "]" : " ",
+           sp == 2 ? "[" : " ", sp == 2 ? "]" : " ",
+           sp == 3 ? "[" : " ", sp == 3 ? "]" : " ");
+  display::setTopText(t);
+}
+
+static void startReplay()
+{
+  char path[32];
+  logbook::filename((uint16_t)(g_lbPage * 3 + g_dtRow), path, sizeof(path));
+
+  display::bannerIn("LOADING", "");
+  if (!replay::load(path))
+  {
+    display::bannerLine2In("could not read");
+    delay(1500);
+    openJumpDetail(g_dtRow);
+    return;
+  }
+  replay::start();
+  replayTopText();
+  display::setScreen(display::UI_REPLAY);
+}
+
+static void endReplay()
+{
+  replay::stop();
+  display::setTopText("");
+  openJumpDetail(g_dtRow);
+}
+#endif
+
 static void openJumpDetail(uint8_t row)
 {
+#if LOGGER_ENABLED && !BENCH_MODE
+  g_dtRow = row;
+#endif
   const uint16_t idx = g_lbPage * 3 + row;
   if (idx >= logbook::count()) return;
   const logbook::Entry &e = logbook::at(idx);
@@ -996,6 +1044,13 @@ static void handleGesture(const touch::Event &e)
       else if (g_clkField < 4) { g_clkField++; clockPublish(); }
       else                       clockCommit();
       break;
+#if LOGGER_ENABLED && !BENCH_MODE
+    case display::ACT_REPLAY:      startReplay(); break;
+    case display::ACT_RSPD1:       replay::setSpeed(1); replayTopText(); break;
+    case display::ACT_RSPD2:       replay::setSpeed(2); replayTopText(); break;
+    case display::ACT_RSPD3:       replay::setSpeed(3); replayTopText(); break;
+    case display::ACT_REPLAY_EXIT: endReplay(); break;
+#endif
     case display::ACT_CANCEL:  closeMenu(); break;
     default: break;
   }
@@ -1035,6 +1090,9 @@ static void pollButton(uint32_t nowMs)
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
       MARK_ACTIVE(nowMs, "button-release");
       if (demo::active())                            demo::stop();
+#if LOGGER_ENABLED && !BENCH_MODE
+      else if (replay::active())                     endReplay();
+#endif
       else if (display::screen() == display::UI_ALT) openMenu();
       else                                           closeMenu();
     }
@@ -1641,7 +1699,15 @@ void loop()
       }
       g_autoOffWarnMs = 0;                        // interaction cancels auto-off
       MARK_ACTIVE(now, "touch");
-      if (demo::active())                          demo::stop();
+    #if LOGGER_ENABLED && !BENCH_MODE
+  // Replay owns the display while it runs, exactly as the demo does. Sampling
+  // and logging carry on underneath — the device is still an altimeter.
+  if (replay::active())
+  {
+    replay::update(now);
+  }
+#endif
+  if (demo::active())                          demo::stop();
       else if (display::screen() != display::UI_ALT) handleGesture(e);
     }
   }

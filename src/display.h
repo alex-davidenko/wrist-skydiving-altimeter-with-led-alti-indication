@@ -42,6 +42,7 @@ enum UiScreen : uint8_t
   UI_SET_CLOCK,        // the field editor itself
   UI_SET_JUMPNO,       // same editor, four digits, your jump total
   UI_LED_TEST,         // bench only: strip bring-up
+  UI_REPLAY,           // a recorded jump, played back
   UI_MENU5,            // page 5: LOGBOOK
   UI_LOGBOOK,          // list of jumps read off the card
   UI_JUMP_DETAIL,      // one jump's numbers
@@ -66,6 +67,9 @@ enum UiAction : uint8_t
   ACT_CLOCK,           // open the clock editor
   ACT_JUMPNO,          // open the jump-number editor
   ACT_LEDTEST,         // open the LED bring-up screen
+  ACT_REPLAY,          // play the jump shown in the detail view
+  ACT_RSPD1, ACT_RSPD2, ACT_RSPD3,   // replay speed
+  ACT_REPLAY_EXIT,     // back to the stats
   ACT_LOGBOOK,         // open the logbook
   ACT_LOG_ROW0,        // tap a row in the list
   ACT_LOG_ROW1,

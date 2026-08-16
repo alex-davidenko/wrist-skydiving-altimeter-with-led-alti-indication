@@ -101,6 +101,7 @@ constexpr Rect kBtnWide  = { 60, 40, 200,  95};   // single-button pages
 // Clock editor: three controls along the bottom, value above them.
 // Three list rows, then a footer with prev/next. Rows are wide and tall
 // because they are tapped with a gloved thumb, not a stylus.
+constexpr Rect kBtnReplay = { 196, 140, 116,  28};   // detail page, bottom right
 constexpr Rect kLbRow[3] = {{ 10, 30, 300, 34},
                             { 10, 66, 300, 34},
                             { 10,102, 300, 34}};
@@ -782,6 +783,7 @@ void renderUi(const Shared &st)
       }
       g_gfx->setCursor(14, 158);
       g_gfx->print("tap to go back");
+      drawButton(kBtnReplay, RGB565_GREEN, "REPLAY", "");
       break;
     }
     case UI_LED_TEST:
@@ -995,15 +997,19 @@ void blitDigit(const AltFont *af, char ch, int16_t penX, int16_t baseline,
 // framebuffer would not help; the flush is the same 23.7 ms transfer.
 void renderFrame(const Shared &st)
 {
-  if (st.screen != UI_ALT)
+  // Replay draws through the altitude view: same colours, same digits, same
+  // blink. That is the point of it — you are watching what the device showed,
+  // not a diagram of it. Only the top band differs, and publish() carries that.
+  const bool altView = (st.screen == UI_ALT || st.screen == UI_REPLAY);
+  if (!altView)
   {
     if (st.screen != g_lastScreen) { renderUi(st); g_lastScreen = st.screen; }
     return;
   }
-  if (g_lastScreen != UI_ALT)
+  if (g_lastScreen != st.screen)
   {
-    // Coming back from the menu: force a full repaint of the altitude view.
-    g_lastScreen = UI_ALT;
+    // Coming back from the menu, or into replay: force a full repaint.
+    g_lastScreen = st.screen;
     g_lastBg = 0xDEAD;
   }
 
@@ -1186,7 +1192,7 @@ bool backlightPhase(const Shared &st, uint32_t nowMs)
   // altitude pattern underneath is irrelevant to what is on screen. This is not
   // only a bench-scale annoyance: the menu would strobe when opened below 800 m
   // in freefall, or anywhere in the 100-300 m landing ladder under canopy.
-  if (st.screen != UI_ALT) return true;
+  if (st.screen != UI_ALT && st.screen != UI_REPLAY) return true;
 
   // The panel stays lit even when the pattern colour is black. Black is the
   // "no alarm" state, not "no display" — at and below ground level you still
@@ -1394,7 +1400,20 @@ uint8_t hitTest(int16_t x, int16_t y)
       if (inside(kLbNext, x, y)) return ACT_LOG_NEXT;
       return ACT_NONE;
     case UI_JUMP_DETAIL:
-      return ACT_LOGBOOK;                 // any tap goes back to the list
+      if (inside(kBtnReplay, x, y)) return ACT_REPLAY;
+      return ACT_LOGBOOK;                 // any other tap goes back to the list
+    case UI_REPLAY:
+      // Speed lives in the top band, which is free during replay — the
+      // vertical-speed readout it normally holds is already on screen as the
+      // altitude itself. Anywhere else exits, because during a replay there is
+      // nothing else a tap could mean, and BOOT does the same.
+      if (y < ALT_TOP_BAND + 14)
+      {
+        if (x < DISPLAY_W / 3)          return ACT_RSPD1;
+        if (x < (DISPLAY_W * 2) / 3)    return ACT_RSPD2;
+        return ACT_RSPD3;
+      }
+      return ACT_REPLAY_EXIT;
     case UI_LED_TEST:
     case UI_SET_JUMPNO:
     case UI_SET_CLOCK:
