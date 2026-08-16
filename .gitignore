@@ -8,3 +8,4 @@
 .vscode/
 backup/
 logs/
+.DS_Store
