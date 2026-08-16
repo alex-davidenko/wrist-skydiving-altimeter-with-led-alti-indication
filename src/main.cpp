@@ -683,6 +683,15 @@ static uint8_t g_lbPage = 0;
 
 // Formatting lives here, next to the data, rather than in the renderer — the
 // renderer takes finished strings so it never has to know what a jump is.
+// The logbook follows the display units like everything else. Stored values are
+// always metric — only the presentation changes, same rule as the altitude.
+static inline int altDisp(float m)
+{ return (int)lroundf(display::unitsFeet() ? m * 3.28084f : m); }
+static inline int spdDisp(float mps)
+{ return (int)lroundf(display::unitsFeet() ? mps * 3.28084f : mps); }
+static inline const char *altUnit() { return display::unitsFeet() ? "ft" : "m"; }
+static inline const char *spdUnit() { return display::unitsFeet() ? "ft/s" : "m/s"; }
+
 static void logbookPublish()
 {
   const uint16_t n = logbook::count();
@@ -695,15 +704,16 @@ static void logbookPublish()
     const uint16_t idx = g_lbPage * 3 + i;
     if (idx >= n) break;
     const logbook::Entry &e = logbook::at(idx);
-    // "182  9Aug 2817m" — the number first, because that is what a jumper
-    // looks for, and the date short because the panel is 320 px wide.
-    static const char *kMon[12] = {"Jan","Feb","Mar","Apr","May","Jun",
-                                   "Jul","Aug","Sep","Oct","Nov","Dec"};
-    int y = 0, m = 1, d = 1;
-    sscanf(e.date, "%d-%d-%d", &y, &m, &d);
-    if (m < 1 || m > 12) m = 1;
-    snprintf(rows[i], sizeof(rows[i]), "%-4u %2d%s %4dm",
-             e.number, d, kMon[m - 1], e.exitM);
+    // "185   3778>850    50" — number, exit>opening, average freefall speed.
+    // Three numbers is what makes a jump recognisable in a list; the date is
+    // not, and at text size 2 the row is 23 characters, so it had to go. It is
+    // still on the detail page.
+    //
+    // Speed is the AVERAGE, not a peak. Peak descent is not measurable at this
+    // noise level — see logger.h — so there is no honest maximum to print here.
+    snprintf(rows[i], sizeof(rows[i]), "%-4u %5d>%-5d %3d",
+             e.number, altDisp(e.exitM), altDisp(e.openM),
+             spdDisp(e.avgFreefallMps));
   }
   display::setLogbookPage(rows, g_lbPage, pages, n);
 }
@@ -739,13 +749,13 @@ static void openJumpDetail(uint8_t row)
   char title[24];
   snprintf(title, sizeof(title), "JUMP %u", e.number);
   char L[5][32];
-  snprintf(L[0], sizeof(L[0]), "date      %s", e.date);
-  snprintf(L[1], sizeof(L[1]), "exit      %d m", e.exitM);
-  snprintf(L[2], sizeof(L[2]), "opened    %d m", e.openM);
-  snprintf(L[3], sizeof(L[3]), "freefall  %.0f s at %.0f m/s",
-           e.freefallS, e.avgFreefallMps);
-  snprintf(L[4], sizeof(L[4]), "canopy    %.0f s   climb %.1f m/s",
-           e.canopyS, e.avgClimbMps);
+  snprintf(L[0], sizeof(L[0]), "date     %s", e.date);
+  snprintf(L[1], sizeof(L[1]), "exit     %d %s", altDisp(e.exitM), altUnit());
+  snprintf(L[2], sizeof(L[2]), "opened   %d %s", altDisp(e.openM), altUnit());
+  snprintf(L[3], sizeof(L[3]), "freefall %.0fs avg %d %s",
+           e.freefallS, spdDisp(e.avgFreefallMps), spdUnit());
+  snprintf(L[4], sizeof(L[4]), "canopy   %.0fs climb %d %s",
+           e.canopyS, spdDisp(e.avgClimbMps), spdUnit());
   display::setJumpDetail(title, L);
 }
 
