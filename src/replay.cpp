@@ -162,7 +162,21 @@ bool load(const char *path)
   // freefall is nearly raw, because the adaptive gate had degenerated into a
   // pass-through. This is what a working filter would have produced.
   {
-    constexpr int kSmooth = 5;               // 0.5 s at 10 Hz
+    // 2.5 s, centred. Far heavier than the live path would tolerate, and it
+    // can be: a replay has no latency requirement, so the window costs nothing
+    // that matters. Measured on jump 185 across the freefall, worst second:
+    //
+    //   0.5 s smoothing   -7 m to 142 m      (true is about 50 m)
+    //   1.5 s             +8 m to 108 m
+    //   2.5 s             +8 m to  89 m
+    //
+    // Those plateaus and 100 m lurches are what reads as the display freezing
+    // and then jumping. They are not a stall — the loop was measured clean
+    // throughout — they are the +/-40 m of turbulence the static port is meant
+    // to fix, and no amount of smoothing removes them entirely. Going past
+    // ~2.5 s starts blurring the canopy opening, which is a real 2-4 s event
+    // worth seeing.
+    constexpr int kSmooth = 25;              // 2.5 s at 10 Hz
     constexpr int kWin    = 15;              // 1.5 s, matching VELOCITY_WINDOW_MS
     static float tmp[kMaxRows];
     for (uint16_t i = 0; i < g_len; i++)

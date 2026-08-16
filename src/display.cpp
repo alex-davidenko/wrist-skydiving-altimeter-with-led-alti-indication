@@ -801,7 +801,7 @@ void renderUi(const Shared &st)
       g_gfx->setTextColor(act == 0 ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
       g_gfx->setCursor(10, 16);
       char line[24];
-      snprintf(line, sizeof(line), "%-14s", nm);
+      snprintf(line, sizeof(line), "%-14.14s", nm);   // pad AND clamp: nm is 32 bytes
       g_gfx->print(line);
 
       g_gfx->setTextColor(act == 1 ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
