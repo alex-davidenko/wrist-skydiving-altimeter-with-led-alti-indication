@@ -1,11 +1,16 @@
-# Wrist altimeter — v0.10.0
+# Wrist altimeter — v1.0.0
 
 ESP32-S3 + MS5611 (GY-63) → filtered altitude → colour-coded 172×320 panel.
 
 Version lives in `FW_VERSION` in `config.h` and is stamped into the boot log and
-every jump log header. **1.0.0 is reserved for the first firmware that has flown
-and been checked against a reference altimeter** — until then it stays 0.x,
-however finished it looks on a desk.
+every jump log header. **1.0.0 was reserved for the first firmware that had
+flown and been checked against a reference altimeter** — earned on 14–15 August
+2026 across jumps 183–186, which tracked an L&B Altitrack metre for metre on the
+climb.
+
+It does not mean finished — see the enclosure warning below. It means the
+numbers have been checked against something real, which is the one thing a desk
+cannot tell you.
 
 Three flight phases, chosen automatically from vertical speed:
 

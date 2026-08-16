@@ -13,10 +13,14 @@
 // says which firmware produced it — the compile timestamp already there
 // identifies a build, but not what was in it.
 //
-// The scheme: 1.0.0 is reserved for the first firmware that has actually
-// flown and been checked against a reference altimeter. Everything before
-// that is 0.x, however finished it looks on a desk.
-#define FW_VERSION "0.10.0"
+// The scheme: 1.0.0 was reserved for the first firmware that had actually flown
+// and been checked against a reference altimeter. Earned on 14-15 Aug 2026 —
+// jumps 183-186, tracking an L&B Altitrack metre for metre on the climb.
+//
+// It does not mean finished. The enclosure still leaks and freefall noise is
+// 9-16 m RMS; see the README. It means the numbers have been checked against
+// something real, which is the only thing a desk cannot tell you.
+#define FW_VERSION "1.0.0"
 
 // ===========================================================================
 //  MODE
