@@ -864,9 +864,13 @@ static void handleGesture(const touch::Event &e)
   // the first and vice versa. With five pages the logbook is four swipes away
   // going forwards and one going back, which is the whole point.
   {
-    static const uint8_t kPages[] = {display::UI_MENU,  display::UI_MENU2,
-                                     display::UI_MENU3, display::UI_MENU4,
-                                     display::UI_MENU5};
+    // UI_MENU2 is gone from the carousel: UNMOUNT CARD and DEMO JUMP were the
+    // only things on it. Unmounting is redundant now that USB drive mode ejects
+    // properly, and the demo is being replaced by replaying a real jump out of
+    // the logbook. The enum value stays so the confirm screens keep their
+    // numbering; nothing reaches it.
+    static const uint8_t kPages[] = {display::UI_MENU,  display::UI_MENU3,
+                                     display::UI_MENU4, display::UI_MENU5};
     constexpr int kN = sizeof(kPages) / sizeof(kPages[0]);
     if (e.type == touch::EV_SWIPE_LEFT || e.type == touch::EV_SWIPE_RIGHT)
     {

@@ -678,15 +678,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_GREEN,  "ZERO",  "HERE");
       drawButton(kBtnRight, RGB565_ORANGE, "POWER", "OFF");
-      drawPager(0, 5);
-      break;
-
-    case UI_MENU2:
-      g_gfx->setCursor(20, 12);
-      g_gfx->print("MENU");
-      drawButton(kBtnLeft,  RGB565_BLUE,  "UNMOUNT", "CARD");
-      drawButton(kBtnRight, RGB565_GREEN, "DEMO",    "JUMP");
-      drawPager(1, 5);
+      drawPager(0, 4);
       break;
 
     case UI_MENU3:
@@ -695,7 +687,7 @@ void renderUi(const Shared &st)
       drawButton(kBtnLeft,  RGB565_BLUE,   "USB",   "DRIVE");
       drawButton(kBtnRight, RGB565_ORANGE, "UNITS",
                  st.feet ? "ft -> m" : "m -> ft");
-      drawPager(2, 5);
+      drawPager(1, 4);
       break;
 
     case UI_MENU4:
@@ -703,7 +695,7 @@ void renderUi(const Shared &st)
       g_gfx->print("MENU");
       drawButton(kBtnLeft,  RGB565_BLUE, "SET", "CLOCK");
       drawButton(kBtnRight, RGB565_BLUE, "JUMP", "No.");
-      drawPager(3, 5);
+      drawPager(2, 4);
       break;
     case UI_MENU5:
       g_gfx->setCursor(20, 12);
@@ -713,7 +705,7 @@ void renderUi(const Shared &st)
       drawButton(kBtnLeft,  RGB565_BLUE,  "LOG",  "BOOK");
       drawButton(kBtnRight, RGB565_GREEN, "LED",  "TEST");
 #endif
-      drawPager(4, 5);
+      drawPager(3, 4);
       break;
 
     case UI_LOGBOOK:
@@ -1372,27 +1364,26 @@ uint8_t hitTest(int16_t x, int16_t y)
     case UI_MENU:
       if (inside(kBtnLeft, x, y))  return ACT_ZERO;
       if (inside(kBtnRight, x, y)) return ACT_POWER;
-      return ACT_CANCEL;                       // anywhere else backs out
-    case UI_MENU2:
-      if (inside(kBtnLeft, x, y))  return ACT_UNMOUNT;
-      if (inside(kBtnRight, x, y)) return ACT_DEMO;
-      return ACT_CANCEL;
+      // A stray tap does NOTHING. Mis-hitting a button and being thrown back to
+      // the altitude screen is worse than the tap being ignored, and BOOT
+      // already closes any screen, so there is always a way out.
+      return ACT_NONE;
     case UI_MENU3:
       if (inside(kBtnLeft, x, y))  return ACT_USB;
       if (inside(kBtnRight, x, y)) return ACT_UNITS;
-      return ACT_CANCEL;
+      return ACT_NONE;
     case UI_MENU4:
       if (inside(kBtnLeft, x, y))  return ACT_CLOCK;
       if (inside(kBtnRight, x, y)) return ACT_JUMPNO;
-      return ACT_CANCEL;
+      return ACT_NONE;
     case UI_MENU5:
 #if LED_TEST_ENABLED
       if (inside(kBtnLeft, x, y))  return ACT_LOGBOOK;
       if (inside(kBtnRight, x, y)) return ACT_LEDTEST;
-      return ACT_CANCEL;
+      return ACT_NONE;
 #endif
       if (inside(kBtnWide, x, y)) return ACT_LOGBOOK;
-      return ACT_CANCEL;
+      return ACT_NONE;
     case UI_LOGBOOK:
       // Every tap here is picking a jump or turning a page, so a stray one must
       // not throw the list away — BOOT is the way out. The detail view keeps
@@ -1418,7 +1409,11 @@ uint8_t hitTest(int16_t x, int16_t y)
     case UI_CONFIRM_USB:
     case UI_CONFIRM_POWER:
       if (inside(kBtnRight, x, y)) return ACT_CONFIRM;
-      return ACT_CANCEL;                       // default to the safe choice
+      if (inside(kBtnLeft, x, y))  return ACT_CANCEL;
+      // Deliberately not "anything else cancels". Cancel is the safe outcome,
+      // but a tap that lands nowhere should still mean nothing — otherwise a
+      // fumbled confirm silently becomes a dismissal.
+      return ACT_NONE;
     default:
       return ACT_NONE;
   }

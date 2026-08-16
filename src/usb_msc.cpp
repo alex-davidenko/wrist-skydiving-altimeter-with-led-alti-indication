@@ -170,7 +170,7 @@ static void waitForExit()
       // Eject first: leaving mid-write corrupts the FAT the host is managing.
       Serial.println(F("usb: BOOT pressed — returning to the altimeter."));
       Serial.flush();
-      display::message("RETURNING", "eject first!");
+      display::message("RETURNING", "");
 
       // Getting out of here without losing the USB port took three attempts,
       // so the reasoning is worth keeping.
@@ -248,7 +248,7 @@ void runForever()
   g_msc.begin(sectorCount, sectorSize);
   USB.begin();
 
-  display::message("USB DRIVE", "RST to go back");
+  display::message("EJECT FIRST", "then press BOOT");
   Serial.println(F("usb: mounted on the host. Eject there, then press RST."));
 
   // Nothing else runs in this mode — no sampling, no logging, no altimeter.
