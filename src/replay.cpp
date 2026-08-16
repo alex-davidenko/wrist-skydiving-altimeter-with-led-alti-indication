@@ -148,13 +148,80 @@ bool load(const char *path)
     return false;
   }
 
-  // Start a few seconds before apogee. Apogee is the exit — the device is on
-  // the jumper — so this opens on the aircraft and then the jump, rather than
-  // on a wall of green already in freefall.
+  // Derive velocity here rather than trust the logged vs_mps column, and smooth
+  // the altitude a little.
+  //
+  // The log's vs_mps is the Kalman velocity state, which is the thing four
+  // jumps proved unusable: it peaked at 2326 m/s and read as CLIMBING for 38%
+  // of freefall. Replaying it feeds the phase machine the exact garbage the
+  // fix exists to avoid, so a replay would show the old bugs rather than what
+  // the device does now. The live firmware takes velocity from a window of
+  // altitude; so does this, over the same 1.5 s.
+  //
+  // The altitude gets a light 0.5 s mean for the same reason: alt_filt_m in
+  // freefall is nearly raw, because the adaptive gate had degenerated into a
+  // pass-through. This is what a working filter would have produced.
+  {
+    constexpr int kSmooth = 5;               // 0.5 s at 10 Hz
+    constexpr int kWin    = 15;              // 1.5 s, matching VELOCITY_WINDOW_MS
+    static float tmp[kMaxRows];
+    for (uint16_t i = 0; i < g_len; i++)
+    {
+      int lo = (i >= kSmooth / 2) ? i - kSmooth / 2 : 0;
+      int hi = (i + kSmooth / 2 < g_len) ? i + kSmooth / 2 : g_len - 1;
+      float acc = 0; int n2 = 0;
+      for (int k = lo; k <= hi; k++) { acc += g_buf[k].alt; n2++; }
+      tmp[i] = acc / n2;
+    }
+    for (uint16_t i = 0; i < g_len; i++) g_buf[i].alt = tmp[i];
+
+    // Least-squares slope over the trailing window, same shape as
+    // VelocityWindow. Uniform sample spacing, so the x-terms are constants.
+    for (uint16_t i = 0; i < g_len; i++)
+    {
+      const int lo = (i >= (uint16_t)kWin) ? i - kWin : 0;
+      const int n2 = i - lo + 1;
+      if (n2 < 3) { g_buf[i].vs = 0.0f; continue; }
+      const float mx = (n2 - 1) * 0.5f;
+      float my = 0;
+      for (int k = 0; k < n2; k++) my += g_buf[lo + k].alt;
+      my /= n2;
+      float num = 0, den = 0;
+      for (int k = 0; k < n2; k++)
+      {
+        const float dx = k - mx;
+        num += dx * (g_buf[lo + k].alt - my);
+        den += dx * dx;
+      }
+      g_buf[i].vs = den > 0 ? (num / den) * kHz : 0.0f;
+    }
+  }
+
+
+  // Find the EXIT, and find it from the derived velocity rather than from
+  // altitude. Peak and exit are not the same point: the aircraft levels off on
+  // jump run, so maximum altitude lands somewhere in a minute of level flight
+  // decided by noise — two reasonable implementations put it 47 s apart on this
+  // jump, both "correct". An altitude threshold does not work either, because
+  // with the door open the reading wobbles +/-40 m while perfectly level.
+  //
+  // Sustained descent is unambiguous. Find a second of real freefall, then walk
+  // back to where the descent started, then back the lead-in.
+  uint16_t exitIdx = peakIdx;
+  for (uint16_t i = peakIdx; i + 10 < g_len; i++)
+  {
+    bool sustained = true;
+    for (int k = 0; k < 10; k++)
+      if (g_buf[i + k].vs > -25.0f) { sustained = false; break; }
+    if (sustained) { exitIdx = i; break; }
+  }
+  while (exitIdx > 0 && g_buf[exitIdx].vs < -5.0f) exitIdx--;
+
   const uint16_t lead = (uint16_t)(kLeadInS * kHz);
-  g_start = (peakIdx > lead) ? (uint16_t)(peakIdx - lead) : 0;
-  Serial.printf("replay: apogee %.0f m at sample %u; starting at %u of %u\n",
-                (double)peak, peakIdx, g_start, g_len);
+  g_start = (exitIdx > lead) ? (uint16_t)(exitIdx - lead) : 0;
+
+  Serial.printf("replay: peak %.0f m at %u, exit at %u, starting at %u of %u\n",
+                (double)peak, peakIdx, exitIdx, g_start, g_len);
   return true;
 }
 
